@@ -154,6 +154,34 @@ export default function Home() {
   const [foundItems, setFoundItems] = useState<Item[]>([]);
 
   const [browseLoading, setBrowseLoading] = useState(false);
+  const [browseSearch, setBrowseSearch] = useState("");
+  const [browseItemType, setBrowseItemType] = useState("all");
+  const [browseLocation, setBrowseLocation] = useState("");
+
+  const normalizedBrowseSearch = browseSearch.trim().toLowerCase();
+  const normalizedBrowseLocation = browseLocation.trim().toLowerCase();
+
+  function matchesBrowseFilters(item: Item) {
+    const matchesSearch =
+      !normalizedBrowseSearch ||
+      item.item_name.toLowerCase().includes(normalizedBrowseSearch) ||
+      item.description.toLowerCase().includes(normalizedBrowseSearch) ||
+      item.location.toLowerCase().includes(normalizedBrowseSearch);
+
+    const matchesLocation =
+      !normalizedBrowseLocation ||
+      item.location.toLowerCase().includes(normalizedBrowseLocation);
+
+    return matchesSearch && matchesLocation;
+  }
+
+  const filteredLostItems = lostItems.filter(matchesBrowseFilters);
+  const filteredFoundItems = foundItems.filter(matchesBrowseFilters);
+  const hasBrowseMatches =
+    ((browseItemType === "all" || browseItemType === "lost") &&
+      filteredLostItems.length > 0) ||
+    ((browseItemType === "all" || browseItemType === "found") &&
+      filteredFoundItems.length > 0);
 
   // =========================
   // MY REPORTS STATES
@@ -1139,16 +1167,56 @@ export default function Home() {
           >
             <h2>🔍 Browse Items</h2>
 
+            <div
+              style={{
+                marginBottom: 20,
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 10,
+              }}
+            >
+              <input
+                type="text"
+                placeholder="Search items..."
+                value={browseSearch}
+                onChange={(e) => setBrowseSearch(e.target.value)}
+                style={{ padding: 10, minWidth: 200 }}
+              />
+
+              <select
+                value={browseItemType}
+                onChange={(e) => setBrowseItemType(e.target.value)}
+                style={{ padding: 10 }}
+              >
+                <option value="all">All Items</option>
+                <option value="lost">Lost Items</option>
+                <option value="found">Found Items</option>
+              </select>
+
+              <input
+                type="text"
+                placeholder="Filter by location..."
+                value={browseLocation}
+                onChange={(e) => setBrowseLocation(e.target.value)}
+                style={{ padding: 10, minWidth: 200 }}
+              />
+            </div>
+
+            {!browseLoading && !hasBrowseMatches && (
+              <p>No items match your search.</p>
+            )}
+
             {browseLoading ? (
               <p>Loading items...</p>
             ) : (
               <>
                 <h3>📦 Lost Items</h3>
 
-                {lostItems.length === 0 ? (
-                  <p>No lost items reported yet.</p>
-                ) : (
-                  lostItems.map((item) => (
+                {browseItemType === "found" ||
+                filteredLostItems.length === 0
+                  ? null
+                  : (
+                  filteredLostItems.map((item) => (
                     <div
                       key={`lost-${item.id}`}
                       style={{
@@ -1210,12 +1278,11 @@ export default function Home() {
 
                 <h3>🎁 Found Items</h3>
 
-                {foundItems.length === 0 ? (
-                  <p>
-                    No found items reported yet.
-                  </p>
-                ) : (
-                  foundItems.map((item) => (
+                {browseItemType === "lost" ||
+                filteredFoundItems.length === 0
+                  ? null
+                  : (
+                  filteredFoundItems.map((item) => (
                     <div
                       key={`found-${item.id}`}
                       style={{
