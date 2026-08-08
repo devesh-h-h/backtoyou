@@ -9,6 +9,7 @@ type Item = {
   description: string;
   location: string;
   user_email: string;
+  image_url?: string | null;
   created_at?: string;
 };
 
@@ -43,6 +44,9 @@ export default function Home() {
   const [description, setDescription] = useState("");
   const [location, setLocation] = useState("");
 
+  const [lostImage, setLostImage] = useState<File | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
   // =========================
   // FOUND ITEM STATES
   // =========================
@@ -52,6 +56,8 @@ export default function Home() {
   const [foundItemName, setFoundItemName] = useState("");
   const [foundDescription, setFoundDescription] = useState("");
   const [foundLocation, setFoundLocation] = useState("");
+  const [foundImage, setFoundImage] = useState<File | null>(null);
+  const [uploadingFoundImage, setUploadingFoundImage] = useState(false);
 
   // =========================
   // BROWSE ITEMS STATES
@@ -69,11 +75,6 @@ export default function Home() {
   // =========================
 
   const [showMyReports, setShowMyReports] = useState(false);
-
-  const [myLostItems, setMyLostItems] = useState<Item[]>([]);
-  const [myFoundItems, setMyFoundItems] = useState<Item[]>([]);
-
-  const [myReportsLoading, setMyReportsLoading] = useState(false);
 
   // =========================
   // ADMIN STATES
@@ -179,39 +180,140 @@ export default function Home() {
   }
 
   // =========================
+  // IMAGE SELECTION
+  // =========================
+
+  function handleLostImageChange(
+    event: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      setLostImage(null);
+      return;
+    }
+
+    // Only allow image files
+    if (!file.type.startsWith("image/")) {
+      alert("Please select an image file.");
+      event.target.value = "";
+      setLostImage(null);
+      return;
+    }
+
+    // Maximum 5 MB
+    if (file.size > 5 * 1024 * 1024) {
+      alert("Image must be smaller than 5 MB.");
+      event.target.value = "";
+      setLostImage(null);
+      return;
+    }
+
+    setLostImage(file);
+  }
+
+  function handleFoundImageChange(
+    event: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      setFoundImage(null);
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      alert("Please select an image file.");
+      event.target.value = "";
+      setFoundImage(null);
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert("Image must be smaller than 5 MB.");
+      event.target.value = "";
+      setFoundImage(null);
+      return;
+    }
+
+    setFoundImage(file);
+  }
+
+  // =========================
   // REPORT LOST ITEM
   // =========================
 
   async function reportLostItem() {
     if (!itemName || !description || !location) {
-      alert("Please fill all fields.");
+      alert("Please fill all required fields.");
       return;
     }
 
+    setUploadingImage(true);
+
+    let imageUrl: string | null = null;
+
+    // Upload image if selected
+    if (lostImage) {
+      const safeFileName = lostImage.name.replace(
+        /[^a-zA-Z0-9.-]/g,
+        "_"
+      );
+
+      const filePath = `${Date.now()}-${safeFileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("item-images")
+        .upload(filePath, lostImage);
+
+      if (uploadError) {
+        console.log(uploadError);
+        alert("Image upload failed: " + uploadError.message);
+        setUploadingImage(false);
+        return;
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from("item-images")
+        .getPublicUrl(filePath);
+
+      imageUrl = publicUrlData.publicUrl;
+    }
+
+    // Save lost item
     const { error } = await supabase.from("lost_items").insert([
       {
         item_name: itemName,
         description: description,
         location: location,
         user_email: email,
+        image_url: imageUrl,
       },
     ]);
 
     if (error) {
       alert(error.message);
-    } else {
-      alert("Lost item reported successfully!");
+      setUploadingImage(false);
+      return;
+    }
 
-      setItemName("");
-      setDescription("");
-      setLocation("");
+    alert("Lost item reported successfully!");
 
-      setShowLostForm(false);
+    setItemName("");
+    setDescription("");
+    setLocation("");
+    setLostImage(null);
 
-      // Refresh My Reports if it is currently open
-      if (showMyReports) {
-        loadMyReports();
-      }
+    setShowLostForm(false);
+    setUploadingImage(false);
+
+    // Refresh current reports if needed
+    if (showBrowse) {
+      loadBrowseItems();
+    }
+
+    if (showMyReports) {
+      loadMyReports();
     }
   }
 
@@ -225,29 +327,70 @@ export default function Home() {
       return;
     }
 
+    setUploadingFoundImage(true);
+
+    let imageUrl: string | null = null;
+
+    if (foundImage) {
+      const safeFileName = foundImage.name.replace(
+        /[^a-zA-Z0-9.-]/g,
+        "_"
+      );
+
+      const filePath = `${Date.now()}-${safeFileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("item-images")
+        .upload(filePath, foundImage);
+
+      if (uploadError) {
+        console.log(uploadError);
+        alert("Image upload failed: " + uploadError.message);
+        setUploadingFoundImage(false);
+        return;
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from("item-images")
+        .getPublicUrl(filePath);
+
+      imageUrl = publicUrlData.publicUrl;
+    }
+
     const { error } = await supabase.from("found_items").insert([
       {
         item_name: foundItemName,
         description: foundDescription,
         location: foundLocation,
         user_email: email,
+        image_url: imageUrl,
       },
     ]);
 
     if (error) {
       alert(error.message);
+      setUploadingFoundImage(false);
     } else {
       alert("Found item reported successfully!");
 
       setFoundItemName("");
       setFoundDescription("");
       setFoundLocation("");
+      setFoundImage(null);
 
       setShowFoundForm(false);
+      setUploadingFoundImage(false);
 
-      // Refresh My Reports if it is currently open
+      if (showBrowse) {
+        loadBrowseItems();
+      }
+
       if (showMyReports) {
         loadMyReports();
+      }
+
+      if (showAdmin) {
+        loadAdminData();
       }
     }
   }
@@ -287,6 +430,8 @@ export default function Home() {
     setShowBrowse(true);
     setShowMyReports(false);
     setShowAdmin(false);
+    setShowLostForm(false);
+    setShowFoundForm(false);
 
     loadBrowseItems();
   }
@@ -296,10 +441,6 @@ export default function Home() {
   // =========================
 
   async function loadMyReports() {
-    if (!email) return;
-
-    setMyReportsLoading(true);
-
     const { data: lostData, error: lostError } = await supabase
       .from("lost_items")
       .select("*")
@@ -313,17 +454,15 @@ export default function Home() {
       .order("id", { ascending: false });
 
     if (lostError) {
-      console.log("My lost reports error:", lostError);
+      console.log(lostError);
     }
 
     if (foundError) {
-      console.log("My found reports error:", foundError);
+      console.log(foundError);
     }
 
-    setMyLostItems(lostData || []);
-    setMyFoundItems(foundData || []);
-
-    setMyReportsLoading(false);
+    setLostItems(lostData || []);
+    setFoundItems(foundData || []);
   }
 
   function openMyReports() {
@@ -411,10 +550,6 @@ export default function Home() {
       setLostItems((items) =>
         items.filter((item) => item.id !== id)
       );
-
-      setMyLostItems((items) =>
-        items.filter((item) => item.id !== id)
-      );
     }
   }
 
@@ -446,10 +581,6 @@ export default function Home() {
       setFoundItems((items) =>
         items.filter((item) => item.id !== id)
       );
-
-      setMyFoundItems((items) =>
-        items.filter((item) => item.id !== id)
-      );
     }
   }
 
@@ -469,9 +600,8 @@ export default function Home() {
     setShowBrowse(false);
     setShowMyReports(false);
     setShowAdmin(false);
-
-    setMyLostItems([]);
-    setMyFoundItems([]);
+    setShowLostForm(false);
+    setShowFoundForm(false);
   }
 
   // =========================
@@ -529,7 +659,7 @@ export default function Home() {
 
         <br />
 
-        {/* ADMIN DASHBOARD BUTTON */}
+        {/* ADMIN DASHBOARD */}
 
         {role === "admin" && (
           <button
@@ -618,8 +748,75 @@ export default function Home() {
               }}
             />
 
-            <button onClick={reportLostItem}>
-              Submit Lost Item Report
+            {/* IMAGE UPLOAD */}
+
+            <div
+              style={{
+                marginBottom: 20,
+                padding: 15,
+                border: "1px dashed #888",
+                borderRadius: 10,
+                maxWidth: 500,
+              }}
+            >
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: 10,
+                  fontWeight: "bold",
+                }}
+              >
+                🖼️ Upload Image of Lost Item
+              </label>
+
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleLostImageChange}
+              />
+
+              <p
+                style={{
+                  fontSize: 13,
+                  color: "#666",
+                  marginTop: 8,
+                }}
+              >
+                Optional • JPG, PNG, WEBP etc. • Maximum 5 MB
+              </p>
+
+              {lostImage && (
+                <div style={{ marginTop: 10 }}>
+                  <p>
+                    Selected: <strong>{lostImage.name}</strong>
+                  </p>
+
+                  <img
+                    src={URL.createObjectURL(lostImage)}
+                    alt="Selected lost item"
+                    style={{
+                      width: 200,
+                      maxHeight: 200,
+                      objectFit: "cover",
+                      borderRadius: 10,
+                      border: "1px solid #ccc",
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={reportLostItem}
+              disabled={uploadingImage}
+              style={{
+                padding: 10,
+                fontSize: 16,
+              }}
+            >
+              {uploadingImage
+                ? "Uploading..."
+                : "Submit Lost Item Report"}
             </button>
           </div>
         )}
@@ -697,8 +894,73 @@ export default function Home() {
               }}
             />
 
-            <button onClick={reportFoundItem}>
-              Submit Found Item Report
+            <div
+              style={{
+                marginBottom: 20,
+                padding: 15,
+                border: "1px dashed #888",
+                borderRadius: 10,
+                maxWidth: 500,
+              }}
+            >
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: 10,
+                  fontWeight: "bold",
+                }}
+              >
+                Upload Image of Found Item
+              </label>
+
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleFoundImageChange}
+              />
+
+              <p
+                style={{
+                  fontSize: 13,
+                  color: "#666",
+                  marginTop: 8,
+                }}
+              >
+                Optional - JPG, PNG, WEBP etc. - Maximum 5 MB
+              </p>
+
+              {foundImage && (
+                <div style={{ marginTop: 10 }}>
+                  <p>
+                    Selected: <strong>{foundImage.name}</strong>
+                  </p>
+
+                  <img
+                    src={URL.createObjectURL(foundImage)}
+                    alt="Selected found item"
+                    style={{
+                      width: 200,
+                      maxHeight: 200,
+                      objectFit: "cover",
+                      borderRadius: 10,
+                      border: "1px solid #ccc",
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={reportFoundItem}
+              disabled={uploadingFoundImage}
+              style={{
+                padding: 10,
+                fontSize: 16,
+              }}
+            >
+              {uploadingFoundImage
+                ? "Uploading..."
+                : "Submit Found Item Report"}
             </button>
           </div>
         )}
@@ -742,6 +1004,21 @@ export default function Home() {
                     >
                       <h3>📦 {item.item_name}</h3>
 
+                      {item.image_url && (
+                        <img
+                          src={item.image_url}
+                          alt={item.item_name}
+                          style={{
+                            width: 250,
+                            maxHeight: 250,
+                            objectFit: "cover",
+                            borderRadius: 10,
+                            border: "1px solid #ccc",
+                            marginBottom: 15,
+                          }}
+                        />
+                      )}
+
                       <p>
                         <strong>Description:</strong>{" "}
                         {item.description}
@@ -760,7 +1037,9 @@ export default function Home() {
                       {item.created_at && (
                         <p>
                           <strong>Reported on:</strong>{" "}
-                          {new Date(item.created_at).toLocaleString()}
+                          {new Date(
+                            item.created_at
+                          ).toLocaleString()}
                         </p>
                       )}
 
@@ -786,6 +1065,20 @@ export default function Home() {
                         marginBottom: 15,
                       }}
                     >
+                      {item.image_url && (
+                        <img
+                          src={item.image_url}
+                          alt={item.item_name}
+                          style={{
+                            width: 250,
+                            maxHeight: 250,
+                            objectFit: "cover",
+                            borderRadius: 10,
+                            border: "1px solid #ccc",
+                            marginBottom: 15,
+                          }}
+                        />
+                      )}
                       <h3>🎁 {item.item_name}</h3>
 
                       <p>
@@ -806,7 +1099,9 @@ export default function Home() {
                       {item.created_at && (
                         <p>
                           <strong>Reported on:</strong>{" "}
-                          {new Date(item.created_at).toLocaleString()}
+                          {new Date(
+                            item.created_at
+                          ).toLocaleString()}
                         </p>
                       )}
 
@@ -834,104 +1129,118 @@ export default function Home() {
         </button>
 
         {showMyReports && (
-          <div
-            style={{
-              marginBottom: 40,
-              padding: 20,
-              border: "1px solid #ccc",
-              borderRadius: 10,
-            }}
-          >
+          <div style={{ marginBottom: 40 }}>
             <h2>👤 My Reports</h2>
 
-            {myReportsLoading ? (
-              <p>Loading your reports...</p>
+            <h3>📦 My Lost Reports</h3>
+
+            {lostItems.length === 0 ? (
+              <p>You have no lost item reports.</p>
             ) : (
-              <>
-                {/* MY LOST REPORTS */}
+              lostItems.map((item) => (
+                <div
+                  key={`my-lost-${item.id}`}
+                  style={{
+                    border: "1px solid #ccc",
+                    borderRadius: 10,
+                    padding: 15,
+                    marginBottom: 15,
+                  }}
+                >
+                  <h3>📦 {item.item_name}</h3>
 
-                <h3>📦 My Lost Reports</h3>
-
-                {myLostItems.length === 0 ? (
-                  <p>You have no lost item reports.</p>
-                ) : (
-                  myLostItems.map((item) => (
-                    <div
-                      key={`my-lost-${item.id}`}
+                  {item.image_url && (
+                    <img
+                      src={item.image_url}
+                      alt={item.item_name}
                       style={{
-                        border: "1px solid #ccc",
+                        width: 250,
+                        maxHeight: 250,
+                        objectFit: "cover",
                         borderRadius: 10,
-                        padding: 15,
+                        border: "1px solid #ccc",
                         marginBottom: 15,
                       }}
-                    >
-                      <h3>📦 {item.item_name}</h3>
+                    />
+                  )}
 
-                      <p>
-                        <strong>Description:</strong>{" "}
-                        {item.description}
-                      </p>
+                  <p>
+                    <strong>Description:</strong>{" "}
+                    {item.description}
+                  </p>
 
-                      <p>
-                        <strong>Location:</strong>{" "}
-                        {item.location}
-                      </p>
+                  <p>
+                    <strong>Location:</strong>{" "}
+                    {item.location}
+                  </p>
 
-                      {item.created_at && (
-                        <p>
-                          <strong>Reported on:</strong>{" "}
-                          {new Date(item.created_at).toLocaleString()}
-                        </p>
-                      )}
+                  {item.created_at && (
+                    <p>
+                      <strong>Reported on:</strong>{" "}
+                      {new Date(
+                        item.created_at
+                      ).toLocaleString()}
+                    </p>
+                  )}
 
-                      <strong>STATUS: LOST</strong>
-                    </div>
-                  ))
-                )}
+                  <strong>STATUS: LOST</strong>
+                </div>
+              ))
+            )}
 
-                <br />
+            <h3>🎁 My Found Reports</h3>
 
-                {/* MY FOUND REPORTS */}
-
-                <h3>🎁 My Found Reports</h3>
-
-                {myFoundItems.length === 0 ? (
-                  <p>You have no found item reports.</p>
-                ) : (
-                  myFoundItems.map((item) => (
-                    <div
-                      key={`my-found-${item.id}`}
+            {foundItems.length === 0 ? (
+              <p>You have no found item reports.</p>
+            ) : (
+              foundItems.map((item) => (
+                <div
+                  key={`my-found-${item.id}`}
+                  style={{
+                    border: "1px solid #ccc",
+                    borderRadius: 10,
+                    padding: 15,
+                    marginBottom: 15,
+                  }}
+                >
+                  {item.image_url && (
+                    <img
+                      src={item.image_url}
+                      alt={item.item_name}
                       style={{
-                        border: "1px solid #ccc",
+                        width: 250,
+                        maxHeight: 250,
+                        objectFit: "cover",
                         borderRadius: 10,
-                        padding: 15,
+                        border: "1px solid #ccc",
                         marginBottom: 15,
                       }}
-                    >
-                      <h3>🎁 {item.item_name}</h3>
+                    />
+                  )}
+                  <h3>🎁 {item.item_name}</h3>
 
-                      <p>
-                        <strong>Description:</strong>{" "}
-                        {item.description}
-                      </p>
+                  <p>
+                    <strong>Description:</strong>{" "}
+                    {item.description}
+                  </p>
 
-                      <p>
-                        <strong>Location:</strong>{" "}
-                        {item.location}
-                      </p>
+                  <p>
+                    <strong>Location:</strong>{" "}
+                    {item.location}
+                  </p>
 
-                      {item.created_at && (
-                        <p>
-                          <strong>Reported on:</strong>{" "}
-                          {new Date(item.created_at).toLocaleString()}
-                        </p>
-                      )}
+                  {item.created_at && (
+                    <p>
+                      <strong>Reported on:</strong>{" "}
+                      {new Date(
+                        item.created_at
+                      ).toLocaleString()}
+                    </p>
+                  )}
 
-                      <strong>STATUS: FOUND</strong>
-                    </div>
-                  ))
-                )}
-              </>
+                  <strong>STATUS: FOUND</strong>
+                </div>
+              ))
             )}
           </div>
         )}
@@ -987,20 +1296,39 @@ export default function Home() {
                 >
                   <h4>📦 {item.item_name}</h4>
 
+                  {item.image_url && (
+                    <img
+                      src={item.image_url}
+                      alt={item.item_name}
+                      style={{
+                        width: 250,
+                        maxHeight: 250,
+                        objectFit: "cover",
+                        borderRadius: 10,
+                        border: "1px solid #ccc",
+                        marginBottom: 15,
+                      }}
+                    />
+                  )}
+
                   <p>{item.description}</p>
 
                   <p>
-                    Location: {item.location}
+                    <strong>Location:</strong>{" "}
+                    {item.location}
                   </p>
 
                   <p>
-                    Reporter: {item.user_email}
+                    <strong>Reporter:</strong>{" "}
+                    {item.user_email}
                   </p>
 
                   {item.created_at && (
                     <p>
-                      Reported on:{" "}
-                      {new Date(item.created_at).toLocaleString()}
+                      <strong>Reported on:</strong>{" "}
+                      {new Date(
+                        item.created_at
+                      ).toLocaleString()}
                     </p>
                   )}
 
@@ -1028,22 +1356,40 @@ export default function Home() {
                     marginBottom: 15,
                   }}
                 >
+                  {item.image_url && (
+                    <img
+                      src={item.image_url}
+                      alt={item.item_name}
+                      style={{
+                        width: 250,
+                        maxHeight: 250,
+                        objectFit: "cover",
+                        borderRadius: 10,
+                        border: "1px solid #ccc",
+                        marginBottom: 15,
+                      }}
+                    />
+                  )}
                   <h4>🎁 {item.item_name}</h4>
 
                   <p>{item.description}</p>
 
                   <p>
-                    Location: {item.location}
+                    <strong>Location:</strong>{" "}
+                    {item.location}
                   </p>
 
                   <p>
-                    Reporter: {item.user_email}
+                    <strong>Reporter:</strong>{" "}
+                    {item.user_email}
                   </p>
 
                   {item.created_at && (
                     <p>
-                      Reported on:{" "}
-                      {new Date(item.created_at).toLocaleString()}
+                      <strong>Reported on:</strong>{" "}
+                      {new Date(
+                        item.created_at
+                      ).toLocaleString()}
                     </p>
                   )}
 
