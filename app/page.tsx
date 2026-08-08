@@ -24,6 +24,15 @@ type Profile = {
   role: string;
 };
 
+type Claim = {
+  id: number;
+  item_id: number;
+  claimant_email: string;
+  claim_message: string;
+  status: "pending" | "approved" | "rejected";
+  created_at?: string;
+};
+
 const COMMON_WORDS = new Set([
   "the",
   "a",
@@ -191,6 +200,11 @@ export default function Home() {
 
   const [myFoundItems, setMyFoundItems] = useState<Item[]>([]);
   const [allFoundItems, setAllFoundItems] = useState<Item[]>([]);
+  const [myClaims, setMyClaims] = useState<Claim[]>([]);
+
+  const [claimItem, setClaimItem] = useState<Item | null>(null);
+  const [claimMessage, setClaimMessage] = useState("");
+  const [submittingClaim, setSubmittingClaim] = useState(false);
 
   // =========================
   // ADMIN STATES
@@ -202,6 +216,7 @@ export default function Home() {
   const [adminLostItems, setAdminLostItems] = useState<Item[]>([]);
   const [adminFoundItems, setAdminFoundItems] =
     useState<Item[]>([]);
+  const [adminClaims, setAdminClaims] = useState<Claim[]>([]);
 
   // =========================
   // SIGN UP
@@ -578,6 +593,80 @@ export default function Home() {
   }
 
   // =========================
+  // CLAIMS
+  // =========================
+
+  function openClaimForm(item: Item) {
+    setClaimItem(item);
+    setClaimMessage("");
+  }
+
+  function cancelClaim() {
+    setClaimItem(null);
+    setClaimMessage("");
+  }
+
+  async function submitClaim() {
+    const trimmedMessage = claimMessage.trim();
+
+    if (!claimItem || !trimmedMessage) {
+      alert("Please enter a claim message.");
+      return;
+    }
+
+    setSubmittingClaim(true);
+
+    const { data: pendingClaim, error: pendingClaimError } =
+      await supabase
+        .from("claims")
+        .select("id")
+        .eq("item_id", claimItem.id)
+        .eq("claimant_email", email)
+        .eq("status", "pending")
+        .maybeSingle();
+
+    if (pendingClaimError) {
+      alert(pendingClaimError.message);
+      setSubmittingClaim(false);
+      return;
+    }
+
+    if (pendingClaim) {
+      alert("You already have a pending claim for this item.");
+      setSubmittingClaim(false);
+      return;
+    }
+
+    const { error } = await supabase.from("claims").insert([
+      {
+        item_id: claimItem.id,
+        claimant_email: email,
+        claim_message: trimmedMessage,
+        status: "pending",
+      },
+    ]);
+
+    if (error) {
+      if (error.code === "23505") {
+        alert("You already have a pending claim for this item.");
+      } else {
+        alert(error.message);
+      }
+
+      setSubmittingClaim(false);
+      return;
+    }
+
+    alert("Claim submitted successfully. The admin will review your request.");
+    cancelClaim();
+    setSubmittingClaim(false);
+
+    if (showMyReports) {
+      loadMyReports();
+    }
+  }
+
+  // =========================
   // MY REPORTS
   // =========================
 
@@ -599,12 +688,22 @@ export default function Home() {
       .select("*")
       .order("id", { ascending: false });
 
+    const { data: claimsData, error: claimsError } = await supabase
+      .from("claims")
+      .select("*")
+      .eq("claimant_email", email)
+      .order("created_at", { ascending: false });
+
     if (lostError) {
       console.log(lostError);
     }
 
     if (foundError) {
       console.log(foundError);
+    }
+
+    if (claimsError) {
+      console.log(claimsError);
     }
 
     setLostItems(lostData || []);
@@ -615,6 +714,7 @@ export default function Home() {
         (item) => item.user_email === email
       )
     );
+    setMyClaims(claimsData || []);
   }
 
   function openMyReports() {
@@ -656,6 +756,11 @@ export default function Home() {
       .select("*")
       .order("id", { ascending: false });
 
+    const { data: claimsData, error: claimsError } = await supabase
+      .from("claims")
+      .select("*")
+      .order("created_at", { ascending: false });
+
     if (profileError) {
       console.log(profileError);
     }
@@ -668,9 +773,14 @@ export default function Home() {
       console.log(foundError);
     }
 
+    if (claimsError) {
+      console.log(claimsError);
+    }
+
     setProfiles(profileData || []);
     setAdminLostItems(lostData || []);
     setAdminFoundItems(foundData || []);
+    setAdminClaims(claimsData || []);
   }
 
   function openAdminDashboard() {
@@ -681,6 +791,29 @@ export default function Home() {
     setShowFoundForm(false);
 
     loadAdminData();
+  }
+
+  async function updateClaimStatus(
+    claimId: number,
+    status: "approved" | "rejected"
+  ) {
+    if (role !== "admin") return;
+
+    const { error } = await supabase
+      .from("claims")
+      .update({ status })
+      .eq("id", claimId);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setAdminClaims((claims) =>
+      claims.map((claim) =>
+        claim.id === claimId ? { ...claim, status } : claim
+      )
+    );
   }
 
   // =========================
@@ -765,6 +898,9 @@ export default function Home() {
     setShowAdmin(false);
     setShowLostForm(false);
     setShowFoundForm(false);
+    setMyClaims([]);
+    setAdminClaims([]);
+    cancelClaim();
   }
 
   // =========================
@@ -1336,10 +1472,60 @@ export default function Home() {
                       )}
 
                       <strong>STATUS: FOUND</strong>
+
+                      <br />
+                      <br />
+
+                      <button onClick={() => openClaimForm(item)}>
+                        Claim This Item
+                      </button>
                     </div>
                   ))
                 )}
               </>
+            )}
+
+            {claimItem && (
+              <div
+                style={{
+                  marginTop: 20,
+                  padding: 20,
+                  border: "1px solid gray",
+                  borderRadius: 10,
+                  maxWidth: 500,
+                }}
+              >
+                <h3>Claim This Item</h3>
+
+                <p>
+                  <strong>Item:</strong> {claimItem.item_name}
+                </p>
+
+                <textarea
+                  placeholder="Explain why you believe this item belongs to you"
+                  value={claimMessage}
+                  onChange={(event) => setClaimMessage(event.target.value)}
+                  style={{
+                    display: "block",
+                    marginBottom: 15,
+                    padding: 10,
+                    width: "100%",
+                    minHeight: 100,
+                  }}
+                />
+
+                <button
+                  onClick={submitClaim}
+                  disabled={submittingClaim}
+                  style={{ marginRight: 10 }}
+                >
+                  {submittingClaim ? "Submitting..." : "Submit Claim"}
+                </button>
+
+                <button onClick={cancelClaim} disabled={submittingClaim}>
+                  Cancel
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -1575,6 +1761,48 @@ export default function Home() {
                 </div>
               ))
             )}
+
+            <h3>My Claims</h3>
+
+            {myClaims.length === 0 ? (
+              <p>You have not submitted any claims.</p>
+            ) : (
+              myClaims.map((claim) => {
+                const foundItem = allFoundItems.find(
+                  (item) => item.id === claim.item_id
+                );
+
+                return (
+                  <div
+                    key={`my-claim-${claim.id}`}
+                    style={{
+                      border: "1px solid #ccc",
+                      borderRadius: 10,
+                      padding: 15,
+                      marginBottom: 15,
+                    }}
+                  >
+                    <h4>{foundItem?.item_name || "Found item"}</h4>
+
+                    <p>
+                      <strong>Claim message:</strong>{" "}
+                      {claim.claim_message}
+                    </p>
+
+                    <p>
+                      <strong>Status:</strong> {claim.status}
+                    </p>
+
+                    {claim.created_at && (
+                      <p>
+                        <strong>Submitted:</strong>{" "}
+                        {new Date(claim.created_at).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
+                );
+              })
+            )}
           </div>
         )}
 
@@ -1754,6 +1982,73 @@ export default function Home() {
                   </button>
                 </div>
               ))
+            )}
+
+            <h3>Claims ({adminClaims.length})</h3>
+
+            {adminClaims.length === 0 ? (
+              <p>No claims submitted.</p>
+            ) : (
+              adminClaims.map((claim) => {
+                const foundItem = adminFoundItems.find(
+                  (item) => item.id === claim.item_id
+                );
+
+                return (
+                  <div
+                    key={`admin-claim-${claim.id}`}
+                    style={{
+                      border: "1px solid #ccc",
+                      borderRadius: 10,
+                      padding: 15,
+                      marginBottom: 15,
+                    }}
+                  >
+                    <h4>{foundItem?.item_name || "Found item"}</h4>
+
+                    <p>
+                      <strong>Claimant:</strong> {claim.claimant_email}
+                    </p>
+
+                    <p>
+                      <strong>Claim message:</strong>{" "}
+                      {claim.claim_message}
+                    </p>
+
+                    <p>
+                      <strong>Status:</strong> {claim.status}
+                    </p>
+
+                    {claim.created_at && (
+                      <p>
+                        <strong>Submitted:</strong>{" "}
+                        {new Date(claim.created_at).toLocaleString()}
+                      </p>
+                    )}
+
+                    {claim.status === "pending" && (
+                      <>
+                        <button
+                          onClick={() =>
+                            updateClaimStatus(claim.id, "approved")
+                          }
+                          style={{ marginRight: 10 }}
+                        >
+                          Approve Claim
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            updateClaimStatus(claim.id, "rejected")
+                          }
+                        >
+                          Reject Claim
+                        </button>
+                      </>
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
         )}
