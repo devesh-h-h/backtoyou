@@ -1,67 +1,84 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-
-type Profile = {
-  id: string;
-  name: string | null;
-  email: string | null;
-  role: string | null;
-  created_at: string;
-};
 
 type Item = {
   id: number;
-  item_name: string | null;
-  description: string | null;
-  location: string | null;
-  user_email: string | null;
-  created_at: string;
+  item_name: string;
+  description: string;
+  location: string;
+  user_email: string;
+  created_at?: string;
+};
+
+type Profile = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
 };
 
 export default function Home() {
   // =========================
-  // AUTH STATES
+  // AUTH / USER STATES
   // =========================
 
   const [isLogin, setIsLogin] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
+  const [role, setRole] = useState("user");
 
   // =========================
   // LOST ITEM STATES
   // =========================
 
   const [showLostForm, setShowLostForm] = useState(false);
-  const [lostItemName, setLostItemName] = useState("");
-  const [lostDescription, setLostDescription] = useState("");
-  const [lostLocation, setLostLocation] = useState("");
+
+  const [itemName, setItemName] = useState("");
+  const [description, setDescription] = useState("");
+  const [location, setLocation] = useState("");
 
   // =========================
   // FOUND ITEM STATES
   // =========================
 
   const [showFoundForm, setShowFoundForm] = useState(false);
+
   const [foundItemName, setFoundItemName] = useState("");
   const [foundDescription, setFoundDescription] = useState("");
   const [foundLocation, setFoundLocation] = useState("");
 
   // =========================
-  // ADMIN STATES
+  // BROWSE ITEMS STATES
   // =========================
 
-  const [showAdminDashboard, setShowAdminDashboard] = useState(false);
+  const [showBrowse, setShowBrowse] = useState(false);
 
-  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [lostItems, setLostItems] = useState<Item[]>([]);
   const [foundItems, setFoundItems] = useState<Item[]>([]);
 
-  const [loadingAdmin, setLoadingAdmin] = useState(false);
+  const [browseLoading, setBrowseLoading] = useState(false);
+
+  // =========================
+  // MY REPORTS STATES
+  // =========================
+
+  const [showMyReports, setShowMyReports] = useState(false);
+
+  // =========================
+  // ADMIN STATES
+  // =========================
+
+  const [showAdmin, setShowAdmin] = useState(false);
+
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [adminLostItems, setAdminLostItems] = useState<Item[]>([]);
+  const [adminFoundItems, setAdminFoundItems] = useState<Item[]>([]);
 
   // =========================
   // SIGN UP
@@ -107,27 +124,30 @@ export default function Home() {
       return;
     }
 
-    // Check profile role
-    const { data: profile } = await supabase
+    // Get profile information
+    const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("name, role")
+      .select("name, email, role")
       .eq("email", email)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (profile?.name) {
-      setName(profile.name);
+    if (profileError) {
+      console.log(profileError);
     }
 
-    if (profile?.role === "admin") {
-      setIsAdmin(true);
+    if (profile) {
+      setName(profile.name || "User");
+      setRole(profile.role || "user");
     } else {
-      setIsAdmin(false);
+      setName("User");
+      setRole("user");
     }
+
+    setLoggedIn(true);
 
     alert("Login successful!");
-    setLoggedIn(true);
   }
 
   // =========================
@@ -136,7 +156,7 @@ export default function Home() {
 
   async function saveProfile() {
     if (!name || !email) {
-      alert("Please enter name and email.");
+      alert("Please enter your name and email.");
       return;
     }
 
@@ -159,16 +179,16 @@ export default function Home() {
   // =========================
 
   async function reportLostItem() {
-    if (!lostItemName || !lostDescription || !lostLocation) {
-      alert("Please fill all lost item fields.");
+    if (!itemName || !description || !location) {
+      alert("Please fill all fields.");
       return;
     }
 
     const { error } = await supabase.from("lost_items").insert([
       {
-        item_name: lostItemName,
-        description: lostDescription,
-        location: lostLocation,
+        item_name: itemName,
+        description: description,
+        location: location,
         user_email: email,
       },
     ]);
@@ -178,9 +198,9 @@ export default function Home() {
     } else {
       alert("Lost item reported successfully!");
 
-      setLostItemName("");
-      setLostDescription("");
-      setLostLocation("");
+      setItemName("");
+      setDescription("");
+      setLocation("");
 
       setShowLostForm(false);
     }
@@ -192,7 +212,7 @@ export default function Home() {
 
   async function reportFoundItem() {
     if (!foundItemName || !foundDescription || !foundLocation) {
-      alert("Please fill all found item fields.");
+      alert("Please fill all fields.");
       return;
     }
 
@@ -219,57 +239,124 @@ export default function Home() {
   }
 
   // =========================
-  // LOAD ADMIN DATA
+  // BROWSE ITEMS
   // =========================
 
-  async function loadAdminDashboard() {
-    if (!isAdmin) {
-      alert("You are not authorized to access the admin dashboard.");
-      return;
-    }
+  async function loadBrowseItems() {
+    setBrowseLoading(true);
 
-    setLoadingAdmin(true);
+    const { data: lostData, error: lostError } = await supabase
+      .from("lost_items")
+      .select("*")
+      .order("id", { ascending: false });
 
-    const [
-      { data: profilesData, error: profilesError },
-      { data: lostData, error: lostError },
-      { data: foundData, error: foundError },
-    ] = await Promise.all([
-      supabase
-        .from("profiles")
-        .select("*")
-        .order("created_at", { ascending: false }),
-
-      supabase
-        .from("lost_items")
-        .select("*")
-        .order("created_at", { ascending: false }),
-
-      supabase
-        .from("found_items")
-        .select("*")
-        .order("created_at", { ascending: false }),
-    ]);
-
-    setLoadingAdmin(false);
-
-    if (profilesError) {
-      alert("Could not load users: " + profilesError.message);
-    }
+    const { data: foundData, error: foundError } = await supabase
+      .from("found_items")
+      .select("*")
+      .order("id", { ascending: false });
 
     if (lostError) {
-      alert("Could not load lost items: " + lostError.message);
+      console.log("Lost items error:", lostError);
     }
 
     if (foundError) {
-      alert("Could not load found items: " + foundError.message);
+      console.log("Found items error:", foundError);
     }
 
-    setProfiles(profilesData || []);
     setLostItems(lostData || []);
     setFoundItems(foundData || []);
 
-    setShowAdminDashboard(true);
+    setBrowseLoading(false);
+  }
+
+  function openBrowse() {
+    setShowBrowse(true);
+    setShowMyReports(false);
+    setShowAdmin(false);
+
+    loadBrowseItems();
+  }
+
+  // =========================
+  // MY REPORTS
+  // =========================
+
+  async function loadMyReports() {
+    const { data: lostData, error: lostError } = await supabase
+      .from("lost_items")
+      .select("*")
+      .eq("user_email", email)
+      .order("id", { ascending: false });
+
+    const { data: foundData, error: foundError } = await supabase
+      .from("found_items")
+      .select("*")
+      .eq("user_email", email)
+      .order("id", { ascending: false });
+
+    if (lostError) {
+      console.log(lostError);
+    }
+
+    if (foundError) {
+      console.log(foundError);
+    }
+
+    setLostItems(lostData || []);
+    setFoundItems(foundData || []);
+  }
+
+  function openMyReports() {
+    setShowMyReports(true);
+    setShowBrowse(false);
+    setShowAdmin(false);
+
+    loadMyReports();
+  }
+
+  // =========================
+  // ADMIN DASHBOARD
+  // =========================
+
+  async function loadAdminData() {
+    const { data: profileData, error: profileError } = await supabase
+      .from("profiles")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    const { data: lostData, error: lostError } = await supabase
+      .from("lost_items")
+      .select("*")
+      .order("id", { ascending: false });
+
+    const { data: foundData, error: foundError } = await supabase
+      .from("found_items")
+      .select("*")
+      .order("id", { ascending: false });
+
+    if (profileError) {
+      console.log(profileError);
+    }
+
+    if (lostError) {
+      console.log(lostError);
+    }
+
+    if (foundError) {
+      console.log(foundError);
+    }
+
+    setProfiles(profileData || []);
+    setAdminLostItems(lostData || []);
+    setAdminFoundItems(foundData || []);
+  }
+
+  function openAdminDashboard() {
+    setShowAdmin(true);
+    setShowBrowse(false);
+    setShowMyReports(false);
+
+    loadAdminData();
   }
 
   // =========================
@@ -277,13 +364,11 @@ export default function Home() {
   // =========================
 
   async function deleteLostItem(id: number) {
-    const confirmed = window.confirm(
+    const confirmed = confirm(
       "Are you sure you want to delete this lost item?"
     );
 
-    if (!confirmed) {
-      return;
-    }
+    if (!confirmed) return;
 
     const { error } = await supabase
       .from("lost_items")
@@ -292,14 +377,17 @@ export default function Home() {
 
     if (error) {
       alert(error.message);
-      return;
+    } else {
+      alert("Lost item deleted.");
+
+      setAdminLostItems((items) =>
+        items.filter((item) => item.id !== id)
+      );
+
+      setLostItems((items) =>
+        items.filter((item) => item.id !== id)
+      );
     }
-
-    setLostItems((items) =>
-      items.filter((item) => item.id !== id)
-    );
-
-    alert("Lost item deleted.");
   }
 
   // =========================
@@ -307,13 +395,11 @@ export default function Home() {
   // =========================
 
   async function deleteFoundItem(id: number) {
-    const confirmed = window.confirm(
+    const confirmed = confirm(
       "Are you sure you want to delete this found item?"
     );
 
-    if (!confirmed) {
-      return;
-    }
+    if (!confirmed) return;
 
     const { error } = await supabase
       .from("found_items")
@@ -322,14 +408,17 @@ export default function Home() {
 
     if (error) {
       alert(error.message);
-      return;
+    } else {
+      alert("Found item deleted.");
+
+      setAdminFoundItems((items) =>
+        items.filter((item) => item.id !== id)
+      );
+
+      setFoundItems((items) =>
+        items.filter((item) => item.id !== id)
+      );
     }
-
-    setFoundItems((items) =>
-      items.filter((item) => item.id !== id)
-    );
-
-    alert("Found item deleted.");
   }
 
   // =========================
@@ -340,221 +429,86 @@ export default function Home() {
     await supabase.auth.signOut();
 
     setLoggedIn(false);
-    setIsAdmin(false);
-    setShowAdminDashboard(false);
-
+    setName("");
     setEmail("");
     setPassword("");
-    setName("");
+    setRole("user");
+
+    setShowBrowse(false);
+    setShowMyReports(false);
+    setShowAdmin(false);
   }
 
   // =========================
-  // ADMIN DASHBOARD
+  // CHECK EXISTING SESSION
   // =========================
 
-  if (loggedIn && showAdminDashboard && isAdmin) {
-    return (
-      <div style={{ padding: 40 }}>
-        <h1>🔧 BackToYou Admin Dashboard</h1>
+  useEffect(() => {
+    async function checkSession() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-        <p>
-          Welcome, <strong>{name || "Admin"}</strong> 👋
-        </p>
+      if (session?.user?.email) {
+        const userEmail = session.user.email;
 
-        <br />
+        setEmail(userEmail);
 
-        <button onClick={() => setShowAdminDashboard(false)}>
-          ← Back to Home
-        </button>
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("name, email, role")
+          .eq("email", userEmail)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-        <button
-          onClick={loadAdminDashboard}
-          style={{ marginLeft: 10 }}
-        >
-          🔄 Refresh
-        </button>
+        if (profile) {
+          setName(profile.name || "User");
+          setRole(profile.role || "user");
+        }
 
-        <hr style={{ margin: "30px 0" }} />
+        setLoggedIn(true);
+      }
+    }
 
-        {loadingAdmin ? (
-          <h3>Loading admin data...</h3>
-        ) : (
-          <>
-            {/* USERS */}
-
-            <h2>👥 Registered Users</h2>
-
-            <p>
-              Total Users: <strong>{profiles.length}</strong>
-            </p>
-
-            {profiles.length === 0 ? (
-              <p>No users found.</p>
-            ) : (
-              profiles.map((profile) => (
-                <div
-                  key={profile.id}
-                  style={{
-                    border: "1px solid #ccc",
-                    borderRadius: 8,
-                    padding: 15,
-                    marginBottom: 10,
-                  }}
-                >
-                  <strong>{profile.name || "No name"}</strong>
-
-                  <br />
-
-                  📧 {profile.email || "No email"}
-
-                  <br />
-
-                  🔐 Role: {profile.role || "user"}
-                </div>
-              ))
-            )}
-
-            <hr style={{ margin: "30px 0" }} />
-
-            {/* LOST ITEMS */}
-
-            <h2>📦 Lost Item Reports</h2>
-
-            <p>
-              Total Lost Reports:{" "}
-              <strong>{lostItems.length}</strong>
-            </p>
-
-            {lostItems.length === 0 ? (
-              <p>No lost item reports.</p>
-            ) : (
-              lostItems.map((item) => (
-                <div
-                  key={item.id}
-                  style={{
-                    border: "1px solid #ccc",
-                    borderRadius: 8,
-                    padding: 15,
-                    marginBottom: 10,
-                  }}
-                >
-                  <h3>{item.item_name}</h3>
-
-                  <p>
-                    <strong>Description:</strong>{" "}
-                    {item.description}
-                  </p>
-
-                  <p>
-                    <strong>Location:</strong>{" "}
-                    {item.location}
-                  </p>
-
-                  <p>
-                    <strong>Reported by:</strong>{" "}
-                    {item.user_email}
-                  </p>
-
-                  <button
-                    onClick={() =>
-                      deleteLostItem(item.id)
-                    }
-                  >
-                    🗑️ Delete
-                  </button>
-                </div>
-              ))
-            )}
-
-            <hr style={{ margin: "30px 0" }} />
-
-            {/* FOUND ITEMS */}
-
-            <h2>🎁 Found Item Reports</h2>
-
-            <p>
-              Total Found Reports:{" "}
-              <strong>{foundItems.length}</strong>
-            </p>
-
-            {foundItems.length === 0 ? (
-              <p>No found item reports.</p>
-            ) : (
-              foundItems.map((item) => (
-                <div
-                  key={item.id}
-                  style={{
-                    border: "1px solid #ccc",
-                    borderRadius: 8,
-                    padding: 15,
-                    marginBottom: 10,
-                  }}
-                >
-                  <h3>{item.item_name}</h3>
-
-                  <p>
-                    <strong>Description:</strong>{" "}
-                    {item.description}
-                  </p>
-
-                  <p>
-                    <strong>Location:</strong>{" "}
-                    {item.location}
-                  </p>
-
-                  <p>
-                    <strong>Reported by:</strong>{" "}
-                    {item.user_email}
-                  </p>
-
-                  <button
-                    onClick={() =>
-                      deleteFoundItem(item.id)
-                    }
-                  >
-                    🗑️ Delete
-                  </button>
-                </div>
-              ))
-            )}
-          </>
-        )}
-
-        <br />
-        <br />
-
-        <button onClick={logout}>
-          🚪 Logout
-        </button>
-      </div>
-    );
-  }
+    checkSession();
+  }, []);
 
   // =========================
-  // LOGGED-IN HOME
+  // LOGGED IN SCREEN
   // =========================
 
   if (loggedIn) {
     return (
-      <div style={{ padding: 40 }}>
+      <div
+        style={{
+          padding: 40,
+          maxWidth: 1000,
+          margin: "0 auto",
+          fontFamily: "Arial, sans-serif",
+        }}
+      >
         <h1>🎒 BackToYou</h1>
 
-        <h2>
-          Welcome, {name || "User"} 👋
-        </h2>
+        <h2>Welcome, {name || "User"} 👋</h2>
 
         <br />
 
-        {/* ADMIN BUTTON */}
+        {/* ADMIN DASHBOARD */}
 
-        {isAdmin && (
+        {role === "admin" && (
           <>
-            <button onClick={loadAdminDashboard}>
-              🔧 Admin Dashboard
+            <button
+              onClick={openAdminDashboard}
+              style={{
+                display: "block",
+                marginBottom: 20,
+                fontSize: 18,
+                padding: 10,
+              }}
+            >
+              🛠️ Admin Dashboard
             </button>
-
-            <br />
-            <br />
           </>
         )}
 
@@ -564,6 +518,15 @@ export default function Home() {
           onClick={() => {
             setShowLostForm(!showLostForm);
             setShowFoundForm(false);
+            setShowBrowse(false);
+            setShowMyReports(false);
+            setShowAdmin(false);
+          }}
+          style={{
+            display: "block",
+            marginBottom: 20,
+            fontSize: 18,
+            padding: 10,
           }}
         >
           📦 Report Lost Item
@@ -572,11 +535,10 @@ export default function Home() {
         {showLostForm && (
           <div
             style={{
-              marginTop: 20,
+              marginBottom: 30,
               padding: 20,
               border: "1px solid gray",
               borderRadius: 10,
-              maxWidth: 500,
             }}
           >
             <h3>📦 Report Lost Item</h3>
@@ -584,53 +546,50 @@ export default function Home() {
             <input
               type="text"
               placeholder="Item Name"
-              value={lostItemName}
-              onChange={(e) =>
-                setLostItemName(e.target.value)
-              }
+              value={itemName}
+              onChange={(e) => setItemName(e.target.value)}
+              style={{
+                display: "block",
+                marginBottom: 15,
+                padding: 10,
+                width: "100%",
+                maxWidth: 500,
+              }}
             />
-
-            <br />
-            <br />
 
             <textarea
               placeholder="Description"
-              value={lostDescription}
-              onChange={(e) =>
-                setLostDescription(e.target.value)
-              }
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              style={{
+                display: "block",
+                marginBottom: 15,
+                padding: 10,
+                width: "100%",
+                maxWidth: 500,
+                minHeight: 100,
+              }}
             />
-
-            <br />
-            <br />
 
             <input
               type="text"
               placeholder="Location Lost"
-              value={lostLocation}
-              onChange={(e) =>
-                setLostLocation(e.target.value)
-              }
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              style={{
+                display: "block",
+                marginBottom: 15,
+                padding: 10,
+                width: "100%",
+                maxWidth: 500,
+              }}
             />
 
-            <br />
-            <br />
-
             <button onClick={reportLostItem}>
-              Submit Lost Report
-            </button>
-
-            <button
-              onClick={() => setShowLostForm(false)}
-              style={{ marginLeft: 10 }}
-            >
-              Cancel
+              Submit Lost Item Report
             </button>
           </div>
         )}
-
-        <br />
-        <br />
 
         {/* FOUND ITEM */}
 
@@ -638,6 +597,15 @@ export default function Home() {
           onClick={() => {
             setShowFoundForm(!showFoundForm);
             setShowLostForm(false);
+            setShowBrowse(false);
+            setShowMyReports(false);
+            setShowAdmin(false);
+          }}
+          style={{
+            display: "block",
+            marginBottom: 20,
+            fontSize: 18,
+            padding: 10,
           }}
         >
           🎁 Report Found Item
@@ -646,11 +614,10 @@ export default function Home() {
         {showFoundForm && (
           <div
             style={{
-              marginTop: 20,
+              marginBottom: 30,
               padding: 20,
               border: "1px solid gray",
               borderRadius: 10,
-              maxWidth: 500,
             }}
           >
             <h3>🎁 Report Found Item</h3>
@@ -659,72 +626,339 @@ export default function Home() {
               type="text"
               placeholder="Item Name"
               value={foundItemName}
-              onChange={(e) =>
-                setFoundItemName(e.target.value)
-              }
+              onChange={(e) => setFoundItemName(e.target.value)}
+              style={{
+                display: "block",
+                marginBottom: 15,
+                padding: 10,
+                width: "100%",
+                maxWidth: 500,
+              }}
             />
-
-            <br />
-            <br />
 
             <textarea
               placeholder="Description"
               value={foundDescription}
-              onChange={(e) =>
-                setFoundDescription(e.target.value)
-              }
+              onChange={(e) => setFoundDescription(e.target.value)}
+              style={{
+                display: "block",
+                marginBottom: 15,
+                padding: 10,
+                width: "100%",
+                maxWidth: 500,
+                minHeight: 100,
+              }}
             />
-
-            <br />
-            <br />
 
             <input
               type="text"
               placeholder="Location Found"
               value={foundLocation}
-              onChange={(e) =>
-                setFoundLocation(e.target.value)
-              }
+              onChange={(e) => setFoundLocation(e.target.value)}
+              style={{
+                display: "block",
+                marginBottom: 15,
+                padding: 10,
+                width: "100%",
+                maxWidth: 500,
+              }}
             />
 
-            <br />
-            <br />
-
             <button onClick={reportFoundItem}>
-              Submit Found Report
-            </button>
-
-            <button
-              onClick={() => setShowFoundForm(false)}
-              style={{ marginLeft: 10 }}
-            >
-              Cancel
+              Submit Found Item Report
             </button>
           </div>
         )}
 
-        <br />
-        <br />
+        {/* BROWSE ITEMS */}
 
-        {/* OTHER FEATURES */}
-
-        <button>
+        <button
+          onClick={openBrowse}
+          style={{
+            display: "block",
+            marginBottom: 20,
+            fontSize: 18,
+            padding: 10,
+          }}
+        >
           🔍 Browse Items
         </button>
 
-        <br />
-        <br />
+        {showBrowse && (
+          <div style={{ marginTop: 20, marginBottom: 40 }}>
+            <h2>🔍 Browse Items</h2>
 
-        <button>
+            {browseLoading ? (
+              <p>Loading items...</p>
+            ) : (
+              <>
+                <h3>📦 Lost Items</h3>
+
+                {lostItems.length === 0 ? (
+                  <p>No lost items reported yet.</p>
+                ) : (
+                  lostItems.map((item) => (
+                    <div
+                      key={`lost-${item.id}`}
+                      style={{
+                        border: "1px solid #ccc",
+                        borderRadius: 10,
+                        padding: 15,
+                        marginBottom: 15,
+                      }}
+                    >
+                      <h3>📦 {item.item_name}</h3>
+
+                      <p>
+                        <strong>Description:</strong>{" "}
+                        {item.description}
+                      </p>
+
+                      <p>
+                        <strong>Location:</strong>{" "}
+                        {item.location}
+                      </p>
+
+                      <p>
+                        <strong>Reported by:</strong>{" "}
+                        {item.user_email}
+                      </p>
+
+                      <strong>STATUS: LOST</strong>
+                    </div>
+                  ))
+                )}
+
+                <br />
+
+                <h3>🎁 Found Items</h3>
+
+                {foundItems.length === 0 ? (
+                  <p>No found items reported yet.</p>
+                ) : (
+                  foundItems.map((item) => (
+                    <div
+                      key={`found-${item.id}`}
+                      style={{
+                        border: "1px solid #ccc",
+                        borderRadius: 10,
+                        padding: 15,
+                        marginBottom: 15,
+                      }}
+                    >
+                      <h3>🎁 {item.item_name}</h3>
+
+                      <p>
+                        <strong>Description:</strong>{" "}
+                        {item.description}
+                      </p>
+
+                      <p>
+                        <strong>Location:</strong>{" "}
+                        {item.location}
+                      </p>
+
+                      <p>
+                        <strong>Reported by:</strong>{" "}
+                        {item.user_email}
+                      </p>
+
+                      <strong>STATUS: FOUND</strong>
+                    </div>
+                  ))
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* MY REPORTS */}
+
+        <button
+          onClick={openMyReports}
+          style={{
+            display: "block",
+            marginBottom: 20,
+            fontSize: 18,
+            padding: 10,
+          }}
+        >
           👤 My Reports
         </button>
 
-        <br />
-        <br />
+        {showMyReports && (
+          <div style={{ marginBottom: 40 }}>
+            <h2>👤 My Reports</h2>
+
+            <h3>📦 My Lost Reports</h3>
+
+            {lostItems.length === 0 ? (
+              <p>You have no lost item reports.</p>
+            ) : (
+              lostItems.map((item) => (
+                <div
+                  key={`my-lost-${item.id}`}
+                  style={{
+                    border: "1px solid #ccc",
+                    borderRadius: 10,
+                    padding: 15,
+                    marginBottom: 15,
+                  }}
+                >
+                  <h3>{item.item_name}</h3>
+                  <p>{item.description}</p>
+                  <p>
+                    <strong>Location:</strong> {item.location}
+                  </p>
+                </div>
+              ))
+            )}
+
+            <h3>🎁 My Found Reports</h3>
+
+            {foundItems.length === 0 ? (
+              <p>You have no found item reports.</p>
+            ) : (
+              foundItems.map((item) => (
+                <div
+                  key={`my-found-${item.id}`}
+                  style={{
+                    border: "1px solid #ccc",
+                    borderRadius: 10,
+                    padding: 15,
+                    marginBottom: 15,
+                  }}
+                >
+                  <h3>{item.item_name}</h3>
+                  <p>{item.description}</p>
+                  <p>
+                    <strong>Location:</strong> {item.location}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* ADMIN DASHBOARD */}
+
+        {showAdmin && role === "admin" && (
+          <div
+            style={{
+              marginTop: 30,
+              marginBottom: 40,
+              padding: 20,
+              border: "2px solid #444",
+              borderRadius: 10,
+            }}
+          >
+            <h2>🛠️ Admin Dashboard</h2>
+
+            <h3>👥 Profiles ({profiles.length})</h3>
+
+            {profiles.map((profile) => (
+              <div
+                key={profile.id}
+                style={{
+                  borderBottom: "1px solid #ddd",
+                  padding: 10,
+                }}
+              >
+                <strong>{profile.name}</strong>
+                <br />
+                {profile.email}
+                <br />
+                Role: {profile.role}
+              </div>
+            ))}
+
+            <br />
+
+            <h3>📦 All Lost Items ({adminLostItems.length})</h3>
+
+            {adminLostItems.length === 0 ? (
+              <p>No lost items.</p>
+            ) : (
+              adminLostItems.map((item) => (
+                <div
+                  key={`admin-lost-${item.id}`}
+                  style={{
+                    border: "1px solid #ccc",
+                    borderRadius: 10,
+                    padding: 15,
+                    marginBottom: 15,
+                  }}
+                >
+                  <h4>📦 {item.item_name}</h4>
+
+                  <p>{item.description}</p>
+
+                  <p>
+                    Location: {item.location}
+                  </p>
+
+                  <p>
+                    Reporter: {item.user_email}
+                  </p>
+
+                  <button
+                    onClick={() => deleteLostItem(item.id)}
+                  >
+                    🗑️ Delete
+                  </button>
+                </div>
+              ))
+            )}
+
+            <h3>🎁 All Found Items ({adminFoundItems.length})</h3>
+
+            {adminFoundItems.length === 0 ? (
+              <p>No found items.</p>
+            ) : (
+              adminFoundItems.map((item) => (
+                <div
+                  key={`admin-found-${item.id}`}
+                  style={{
+                    border: "1px solid #ccc",
+                    borderRadius: 10,
+                    padding: 15,
+                    marginBottom: 15,
+                  }}
+                >
+                  <h4>🎁 {item.item_name}</h4>
+
+                  <p>{item.description}</p>
+
+                  <p>
+                    Location: {item.location}
+                  </p>
+
+                  <p>
+                    Reporter: {item.user_email}
+                  </p>
+
+                  <button
+                    onClick={() => deleteFoundItem(item.id)}
+                  >
+                    🗑️ Delete
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        )}
 
         {/* LOGOUT */}
 
-        <button onClick={logout}>
+        <button
+          onClick={logout}
+          style={{
+            display: "block",
+            marginTop: 20,
+            fontSize: 18,
+            padding: 10,
+          }}
+        >
           🚪 Logout
         </button>
       </div>
@@ -732,16 +966,21 @@ export default function Home() {
   }
 
   // =========================
-  // LOGIN / SIGNUP PAGE
+  // LOGIN / SIGNUP SCREEN
   // =========================
 
   return (
-    <div style={{ padding: 40 }}>
+    <div
+      style={{
+        padding: 40,
+        maxWidth: 600,
+        margin: "0 auto",
+        fontFamily: "Arial, sans-serif",
+      }}
+    >
       <h1>🎒 BackToYou</h1>
 
-      <h2>
-        {isLogin ? "Login" : "Create Account"}
-      </h2>
+      <h2>{isLogin ? "Login" : "Create Account"}</h2>
 
       {!isLogin && (
         <>
@@ -749,13 +988,14 @@ export default function Home() {
             type="text"
             placeholder="Enter Name"
             value={name}
-            onChange={(e) =>
-              setName(e.target.value)
-            }
+            onChange={(e) => setName(e.target.value)}
+            style={{
+              display: "block",
+              marginBottom: 15,
+              padding: 10,
+              width: "100%",
+            }}
           />
-
-          <br />
-          <br />
         </>
       )}
 
@@ -763,44 +1003,39 @@ export default function Home() {
         type="email"
         placeholder="Enter Email"
         value={email}
-        onChange={(e) =>
-          setEmail(e.target.value)
-        }
+        onChange={(e) => setEmail(e.target.value)}
+        style={{
+          display: "block",
+          marginBottom: 15,
+          padding: 10,
+          width: "100%",
+        }}
       />
-
-      <br />
-      <br />
 
       <input
         type="password"
         placeholder="Enter Password"
         value={password}
-        onChange={(e) =>
-          setPassword(e.target.value)
-        }
+        onChange={(e) => setPassword(e.target.value)}
+        style={{
+          display: "block",
+          marginBottom: 15,
+          padding: 10,
+          width: "100%",
+        }}
       />
 
-      <br />
-      <br />
-
       {isLogin ? (
-        <button onClick={login}>
-          Login
-        </button>
+        <button onClick={login}>Login</button>
       ) : (
-        <button onClick={signUp}>
-          Sign Up
-        </button>
+        <button onClick={signUp}>Sign Up</button>
       )}
 
       <br />
       <br />
 
       <button
-        onClick={() => {
-          setIsLogin(!isLogin);
-          setPassword("");
-        }}
+        onClick={() => setIsLogin(!isLogin)}
       >
         {isLogin
           ? "Create New Account"
