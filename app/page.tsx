@@ -13,12 +13,95 @@ type Item = {
   created_at?: string;
 };
 
+type PossibleMatch = Item & {
+  score: number;
+};
+
 type Profile = {
   id: string;
   name: string;
   email: string;
   role: string;
 };
+
+const COMMON_WORDS = new Set([
+  "the",
+  "a",
+  "an",
+  "and",
+  "is",
+  "of",
+  "with",
+  "near",
+  "in",
+  "at",
+  "to",
+  "my",
+  "this",
+  "that",
+]);
+
+function getKeywords(text: string) {
+  return new Set(
+    text
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word && !COMMON_WORDS.has(word))
+  );
+}
+
+function hasMatchingKeyword(firstText: string, secondText: string) {
+  const firstKeywords = getKeywords(firstText);
+  const secondKeywords = getKeywords(secondText);
+
+  return [...firstKeywords].some((word) =>
+    secondKeywords.has(word)
+  );
+}
+
+function getPossibleMatches(
+  lostItem: Item,
+  foundItems: Item[]
+): PossibleMatch[] {
+  return foundItems
+    .map((foundItem): PossibleMatch => {
+      let score = 0;
+
+      if (
+        hasMatchingKeyword(
+          lostItem.item_name,
+          foundItem.item_name
+        )
+      ) {
+        score += 50;
+      }
+
+      if (
+        hasMatchingKeyword(
+          lostItem.location,
+          foundItem.location
+        )
+      ) {
+        score += 30;
+      }
+
+      if (
+        hasMatchingKeyword(
+          lostItem.description,
+          foundItem.description
+        )
+      ) {
+        score += 20;
+      }
+
+      return {
+        ...foundItem,
+        score,
+      };
+    })
+    .filter((item) => item.score >= 50)
+    .sort((a, b) => b.score - a.score);
+}
 
 export default function Home() {
   // =========================
@@ -56,8 +139,10 @@ export default function Home() {
   const [foundItemName, setFoundItemName] = useState("");
   const [foundDescription, setFoundDescription] = useState("");
   const [foundLocation, setFoundLocation] = useState("");
+
   const [foundImage, setFoundImage] = useState<File | null>(null);
-  const [uploadingFoundImage, setUploadingFoundImage] = useState(false);
+  const [uploadingFoundImage, setUploadingFoundImage] =
+    useState(false);
 
   // =========================
   // BROWSE ITEMS STATES
@@ -76,6 +161,9 @@ export default function Home() {
 
   const [showMyReports, setShowMyReports] = useState(false);
 
+  const [myFoundItems, setMyFoundItems] = useState<Item[]>([]);
+  const [allFoundItems, setAllFoundItems] = useState<Item[]>([]);
+
   // =========================
   // ADMIN STATES
   // =========================
@@ -84,7 +172,8 @@ export default function Home() {
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [adminLostItems, setAdminLostItems] = useState<Item[]>([]);
-  const [adminFoundItems, setAdminFoundItems] = useState<Item[]>([]);
+  const [adminFoundItems, setAdminFoundItems] =
+    useState<Item[]>([]);
 
   // =========================
   // SIGN UP
@@ -120,17 +209,21 @@ export default function Home() {
       return;
     }
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { error } =
+      await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
     if (error) {
       alert(error.message);
       return;
     }
 
-    const { data: profile, error: profileError } = await supabase
+    const {
+      data: profile,
+      error: profileError,
+    } = await supabase
       .from("profiles")
       .select("name, email, role")
       .eq("email", email)
@@ -165,12 +258,14 @@ export default function Home() {
       return;
     }
 
-    const { error } = await supabase.from("profiles").insert([
-      {
-        name,
-        email,
-      },
-    ]);
+    const { error } = await supabase
+      .from("profiles")
+      .insert([
+        {
+          name,
+          email,
+        },
+      ]);
 
     if (error) {
       alert(error.message);
@@ -193,7 +288,6 @@ export default function Home() {
       return;
     }
 
-    // Only allow image files
     if (!file.type.startsWith("image/")) {
       alert("Please select an image file.");
       event.target.value = "";
@@ -201,7 +295,6 @@ export default function Home() {
       return;
     }
 
-    // Maximum 5 MB
     if (file.size > 5 * 1024 * 1024) {
       alert("Image must be smaller than 5 MB.");
       event.target.value = "";
@@ -253,7 +346,6 @@ export default function Home() {
 
     let imageUrl: string | null = null;
 
-    // Upload image if selected
     if (lostImage) {
       const safeFileName = lostImage.name.replace(
         /[^a-zA-Z0-9.-]/g,
@@ -262,34 +354,39 @@ export default function Home() {
 
       const filePath = `${Date.now()}-${safeFileName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from("item-images")
-        .upload(filePath, lostImage);
+      const { error: uploadError } =
+        await supabase.storage
+          .from("item-images")
+          .upload(filePath, lostImage);
 
       if (uploadError) {
         console.log(uploadError);
-        alert("Image upload failed: " + uploadError.message);
+        alert(
+          "Image upload failed: " + uploadError.message
+        );
         setUploadingImage(false);
         return;
       }
 
-      const { data: publicUrlData } = supabase.storage
-        .from("item-images")
-        .getPublicUrl(filePath);
+      const { data: publicUrlData } =
+        supabase.storage
+          .from("item-images")
+          .getPublicUrl(filePath);
 
       imageUrl = publicUrlData.publicUrl;
     }
 
-    // Save lost item
-    const { error } = await supabase.from("lost_items").insert([
-      {
-        item_name: itemName,
-        description: description,
-        location: location,
-        user_email: email,
-        image_url: imageUrl,
-      },
-    ]);
+    const { error } = await supabase
+      .from("lost_items")
+      .insert([
+        {
+          item_name: itemName,
+          description,
+          location,
+          user_email: email,
+          image_url: imageUrl,
+        },
+      ]);
 
     if (error) {
       alert(error.message);
@@ -307,7 +404,6 @@ export default function Home() {
     setShowLostForm(false);
     setUploadingImage(false);
 
-    // Refresh current reports if needed
     if (showBrowse) {
       loadBrowseItems();
     }
@@ -322,8 +418,12 @@ export default function Home() {
   // =========================
 
   async function reportFoundItem() {
-    if (!foundItemName || !foundDescription || !foundLocation) {
-      alert("Please fill all fields.");
+    if (
+      !foundItemName ||
+      !foundDescription ||
+      !foundLocation
+    ) {
+      alert("Please fill all required fields.");
       return;
     }
 
@@ -339,59 +439,66 @@ export default function Home() {
 
       const filePath = `${Date.now()}-${safeFileName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from("item-images")
-        .upload(filePath, foundImage);
+      const { error: uploadError } =
+        await supabase.storage
+          .from("item-images")
+          .upload(filePath, foundImage);
 
       if (uploadError) {
         console.log(uploadError);
-        alert("Image upload failed: " + uploadError.message);
+        alert(
+          "Image upload failed: " + uploadError.message
+        );
         setUploadingFoundImage(false);
         return;
       }
 
-      const { data: publicUrlData } = supabase.storage
-        .from("item-images")
-        .getPublicUrl(filePath);
+      const { data: publicUrlData } =
+        supabase.storage
+          .from("item-images")
+          .getPublicUrl(filePath);
 
       imageUrl = publicUrlData.publicUrl;
     }
 
-    const { error } = await supabase.from("found_items").insert([
-      {
-        item_name: foundItemName,
-        description: foundDescription,
-        location: foundLocation,
-        user_email: email,
-        image_url: imageUrl,
-      },
-    ]);
+    const { error } = await supabase
+      .from("found_items")
+      .insert([
+        {
+          item_name: foundItemName,
+          description: foundDescription,
+          location: foundLocation,
+          user_email: email,
+          image_url: imageUrl,
+        },
+      ]);
 
     if (error) {
       alert(error.message);
       setUploadingFoundImage(false);
-    } else {
-      alert("Found item reported successfully!");
+      return;
+    }
 
-      setFoundItemName("");
-      setFoundDescription("");
-      setFoundLocation("");
-      setFoundImage(null);
+    alert("Found item reported successfully!");
 
-      setShowFoundForm(false);
-      setUploadingFoundImage(false);
+    setFoundItemName("");
+    setFoundDescription("");
+    setFoundLocation("");
+    setFoundImage(null);
 
-      if (showBrowse) {
-        loadBrowseItems();
-      }
+    setShowFoundForm(false);
+    setUploadingFoundImage(false);
 
-      if (showMyReports) {
-        loadMyReports();
-      }
+    if (showBrowse) {
+      loadBrowseItems();
+    }
 
-      if (showAdmin) {
-        loadAdminData();
-      }
+    if (showMyReports) {
+      loadMyReports();
+    }
+
+    if (showAdmin) {
+      loadAdminData();
     }
   }
 
@@ -402,12 +509,18 @@ export default function Home() {
   async function loadBrowseItems() {
     setBrowseLoading(true);
 
-    const { data: lostData, error: lostError } = await supabase
+    const {
+      data: lostData,
+      error: lostError,
+    } = await supabase
       .from("lost_items")
       .select("*")
       .order("id", { ascending: false });
 
-    const { data: foundData, error: foundError } = await supabase
+    const {
+      data: foundData,
+      error: foundError,
+    } = await supabase
       .from("found_items")
       .select("*")
       .order("id", { ascending: false });
@@ -441,16 +554,21 @@ export default function Home() {
   // =========================
 
   async function loadMyReports() {
-    const { data: lostData, error: lostError } = await supabase
+    const {
+      data: lostData,
+      error: lostError,
+    } = await supabase
       .from("lost_items")
       .select("*")
       .eq("user_email", email)
       .order("id", { ascending: false });
 
-    const { data: foundData, error: foundError } = await supabase
+    const {
+      data: foundData,
+      error: foundError,
+    } = await supabase
       .from("found_items")
       .select("*")
-      .eq("user_email", email)
       .order("id", { ascending: false });
 
     if (lostError) {
@@ -462,7 +580,13 @@ export default function Home() {
     }
 
     setLostItems(lostData || []);
-    setFoundItems(foundData || []);
+    setAllFoundItems(foundData || []);
+
+    setMyFoundItems(
+      (foundData || []).filter(
+        (item) => item.user_email === email
+      )
+    );
   }
 
   function openMyReports() {
@@ -480,17 +604,26 @@ export default function Home() {
   // =========================
 
   async function loadAdminData() {
-    const { data: profileData, error: profileError } = await supabase
+    const {
+      data: profileData,
+      error: profileError,
+    } = await supabase
       .from("profiles")
       .select("*")
       .order("created_at", { ascending: false });
 
-    const { data: lostData, error: lostError } = await supabase
+    const {
+      data: lostData,
+      error: lostError,
+    } = await supabase
       .from("lost_items")
       .select("*")
       .order("id", { ascending: false });
 
-    const { data: foundData, error: foundError } = await supabase
+    const {
+      data: foundData,
+      error: foundError,
+    } = await supabase
       .from("found_items")
       .select("*")
       .order("id", { ascending: false });
@@ -540,17 +673,18 @@ export default function Home() {
 
     if (error) {
       alert(error.message);
-    } else {
-      alert("Lost item deleted.");
-
-      setAdminLostItems((items) =>
-        items.filter((item) => item.id !== id)
-      );
-
-      setLostItems((items) =>
-        items.filter((item) => item.id !== id)
-      );
+      return;
     }
+
+    alert("Lost item deleted.");
+
+    setAdminLostItems((items) =>
+      items.filter((item) => item.id !== id)
+    );
+
+    setLostItems((items) =>
+      items.filter((item) => item.id !== id)
+    );
   }
 
   // =========================
@@ -571,17 +705,18 @@ export default function Home() {
 
     if (error) {
       alert(error.message);
-    } else {
-      alert("Found item deleted.");
-
-      setAdminFoundItems((items) =>
-        items.filter((item) => item.id !== id)
-      );
-
-      setFoundItems((items) =>
-        items.filter((item) => item.id !== id)
-      );
+      return;
     }
+
+    alert("Found item deleted.");
+
+    setAdminFoundItems((items) =>
+      items.filter((item) => item.id !== id)
+    );
+
+    setFoundItems((items) =>
+      items.filter((item) => item.id !== id)
+    );
   }
 
   // =========================
@@ -623,7 +758,9 @@ export default function Home() {
           .from("profiles")
           .select("name, email, role")
           .eq("email", userEmail)
-          .order("created_at", { ascending: false })
+          .order("created_at", {
+            ascending: false,
+          })
           .limit(1)
           .maybeSingle();
 
@@ -659,7 +796,7 @@ export default function Home() {
 
         <br />
 
-        {/* ADMIN DASHBOARD */}
+        {/* ADMIN */}
 
         {role === "admin" && (
           <button
@@ -710,7 +847,9 @@ export default function Home() {
               type="text"
               placeholder="Item Name"
               value={itemName}
-              onChange={(e) => setItemName(e.target.value)}
+              onChange={(e) =>
+                setItemName(e.target.value)
+              }
               style={{
                 display: "block",
                 marginBottom: 15,
@@ -723,7 +862,9 @@ export default function Home() {
             <textarea
               placeholder="Description"
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={(e) =>
+                setDescription(e.target.value)
+              }
               style={{
                 display: "block",
                 marginBottom: 15,
@@ -738,7 +879,9 @@ export default function Home() {
               type="text"
               placeholder="Location Lost"
               value={location}
-              onChange={(e) => setLocation(e.target.value)}
+              onChange={(e) =>
+                setLocation(e.target.value)
+              }
               style={{
                 display: "block",
                 marginBottom: 15,
@@ -747,8 +890,6 @@ export default function Home() {
                 maxWidth: 500,
               }}
             />
-
-            {/* IMAGE UPLOAD */}
 
             <div
               style={{
@@ -782,13 +923,15 @@ export default function Home() {
                   marginTop: 8,
                 }}
               >
-                Optional • JPG, PNG, WEBP etc. • Maximum 5 MB
+                Optional • JPG, PNG, WEBP etc. •
+                Maximum 5 MB
               </p>
 
               {lostImage && (
                 <div style={{ marginTop: 10 }}>
                   <p>
-                    Selected: <strong>{lostImage.name}</strong>
+                    Selected:{" "}
+                    <strong>{lostImage.name}</strong>
                   </p>
 
                   <img
@@ -856,7 +999,9 @@ export default function Home() {
               type="text"
               placeholder="Item Name"
               value={foundItemName}
-              onChange={(e) => setFoundItemName(e.target.value)}
+              onChange={(e) =>
+                setFoundItemName(e.target.value)
+              }
               style={{
                 display: "block",
                 marginBottom: 15,
@@ -869,7 +1014,9 @@ export default function Home() {
             <textarea
               placeholder="Description"
               value={foundDescription}
-              onChange={(e) => setFoundDescription(e.target.value)}
+              onChange={(e) =>
+                setFoundDescription(e.target.value)
+              }
               style={{
                 display: "block",
                 marginBottom: 15,
@@ -884,7 +1031,9 @@ export default function Home() {
               type="text"
               placeholder="Location Found"
               value={foundLocation}
-              onChange={(e) => setFoundLocation(e.target.value)}
+              onChange={(e) =>
+                setFoundLocation(e.target.value)
+              }
               style={{
                 display: "block",
                 marginBottom: 15,
@@ -910,7 +1059,7 @@ export default function Home() {
                   fontWeight: "bold",
                 }}
               >
-                Upload Image of Found Item
+                🖼️ Upload Image of Found Item
               </label>
 
               <input
@@ -926,13 +1075,15 @@ export default function Home() {
                   marginTop: 8,
                 }}
               >
-                Optional - JPG, PNG, WEBP etc. - Maximum 5 MB
+                Optional • JPG, PNG, WEBP etc. •
+                Maximum 5 MB
               </p>
 
               {foundImage && (
                 <div style={{ marginTop: 10 }}>
                   <p>
-                    Selected: <strong>{foundImage.name}</strong>
+                    Selected:{" "}
+                    <strong>{foundImage.name}</strong>
                   </p>
 
                   <img
@@ -980,7 +1131,12 @@ export default function Home() {
         </button>
 
         {showBrowse && (
-          <div style={{ marginTop: 20, marginBottom: 40 }}>
+          <div
+            style={{
+              marginTop: 20,
+              marginBottom: 40,
+            }}
+          >
             <h2>🔍 Browse Items</h2>
 
             {browseLoading ? (
@@ -1002,7 +1158,9 @@ export default function Home() {
                         marginBottom: 15,
                       }}
                     >
-                      <h3>📦 {item.item_name}</h3>
+                      <h3>
+                        📦 {item.item_name}
+                      </h3>
 
                       {item.image_url && (
                         <img
@@ -1053,7 +1211,9 @@ export default function Home() {
                 <h3>🎁 Found Items</h3>
 
                 {foundItems.length === 0 ? (
-                  <p>No found items reported yet.</p>
+                  <p>
+                    No found items reported yet.
+                  </p>
                 ) : (
                   foundItems.map((item) => (
                     <div
@@ -1079,7 +1239,10 @@ export default function Home() {
                           }}
                         />
                       )}
-                      <h3>🎁 {item.item_name}</h3>
+
+                      <h3>
+                        🎁 {item.item_name}
+                      </h3>
 
                       <p>
                         <strong>Description:</strong>{" "}
@@ -1135,65 +1298,165 @@ export default function Home() {
             <h3>📦 My Lost Reports</h3>
 
             {lostItems.length === 0 ? (
-              <p>You have no lost item reports.</p>
+              <p>
+                You have no lost item reports.
+              </p>
             ) : (
-              lostItems.map((item) => (
-                <div
-                  key={`my-lost-${item.id}`}
-                  style={{
-                    border: "1px solid #ccc",
-                    borderRadius: 10,
-                    padding: 15,
-                    marginBottom: 15,
-                  }}
-                >
-                  <h3>📦 {item.item_name}</h3>
+              lostItems.map((item) => {
+                const matches = getPossibleMatches(
+                  item,
+                  allFoundItems
+                );
 
-                  {item.image_url && (
-                    <img
-                      src={item.image_url}
-                      alt={item.item_name}
-                      style={{
-                        width: 250,
-                        maxHeight: 250,
-                        objectFit: "cover",
-                        borderRadius: 10,
-                        border: "1px solid #ccc",
-                        marginBottom: 15,
-                      }}
-                    />
-                  )}
+                return (
+                  <div
+                    key={`my-lost-${item.id}`}
+                    style={{
+                      border: "1px solid #ccc",
+                      borderRadius: 10,
+                      padding: 15,
+                      marginBottom: 15,
+                    }}
+                  >
+                    <h3>
+                      📦 {item.item_name}
+                    </h3>
 
-                  <p>
-                    <strong>Description:</strong>{" "}
-                    {item.description}
-                  </p>
+                    {item.image_url && (
+                      <img
+                        src={item.image_url}
+                        alt={item.item_name}
+                        style={{
+                          width: 250,
+                          maxHeight: 250,
+                          objectFit: "cover",
+                          borderRadius: 10,
+                          border: "1px solid #ccc",
+                          marginBottom: 15,
+                        }}
+                      />
+                    )}
 
-                  <p>
-                    <strong>Location:</strong>{" "}
-                    {item.location}
-                  </p>
-
-                  {item.created_at && (
                     <p>
-                      <strong>Reported on:</strong>{" "}
-                      {new Date(
-                        item.created_at
-                      ).toLocaleString()}
+                      <strong>Description:</strong>{" "}
+                      {item.description}
                     </p>
-                  )}
 
-                  <strong>STATUS: LOST</strong>
-                </div>
-              ))
+                    <p>
+                      <strong>Location:</strong>{" "}
+                      {item.location}
+                    </p>
+
+                    {item.created_at && (
+                      <p>
+                        <strong>Reported on:</strong>{" "}
+                        {new Date(
+                          item.created_at
+                        ).toLocaleString()}
+                      </p>
+                    )}
+
+                    <strong>STATUS: LOST</strong>
+
+                    <div
+                      style={{
+                        marginTop: 20,
+                        paddingTop: 15,
+                        borderTop: "1px solid #ddd",
+                      }}
+                    >
+                      <h4>🔎 Possible Matches</h4>
+
+                      {matches.length === 0 ? (
+                        <p>
+                          No possible matches found yet.
+                        </p>
+                      ) : (
+                        matches.map((match) => (
+                          <div
+                            key={`match-${item.id}-${match.id}`}
+                            style={{
+                              padding: 12,
+                              marginBottom: 12,
+                              border:
+                                "1px solid #ddd",
+                              borderRadius: 8,
+                            }}
+                          >
+                            <h4>
+                              🎁 {match.item_name}
+                            </h4>
+
+                            {match.image_url && (
+                              <img
+                                src={match.image_url}
+                                alt={match.item_name}
+                                style={{
+                                  width: 180,
+                                  maxHeight: 180,
+                                  objectFit: "cover",
+                                  borderRadius: 8,
+                                  border:
+                                    "1px solid #ccc",
+                                  marginBottom: 10,
+                                }}
+                              />
+                            )}
+
+                            <p>
+                              <strong>
+                                Location:
+                              </strong>{" "}
+                              {match.location}
+                            </p>
+
+                            <p>
+                              <strong>
+                                Description:
+                              </strong>{" "}
+                              {match.description}
+                            </p>
+
+                            <p>
+                              <strong>
+                                Match Score:
+                              </strong>{" "}
+                              {match.score}%
+                            </p>
+
+                            <button
+                              onClick={openBrowse}
+                            >
+                              View in Browse Items
+                            </button>
+                          </div>
+                        ))
+                      )}
+
+                      <p
+                        style={{
+                          fontSize: 13,
+                          color: "#666",
+                        }}
+                      >
+                        This is a possible match based
+                        on item details. Please verify
+                        the item before claiming it.
+                      </p>
+                    </div>
+                  </div>
+                );
+              })
             )}
 
             <h3>🎁 My Found Reports</h3>
 
-            {foundItems.length === 0 ? (
-              <p>You have no found item reports.</p>
+            {myFoundItems.length === 0 ? (
+              <p>
+                You have no found item reports.
+              </p>
             ) : (
-              foundItems.map((item) => (
+              myFoundItems.map((item) => (
                 <div
                   key={`my-found-${item.id}`}
                   style={{
@@ -1217,7 +1480,10 @@ export default function Home() {
                       }}
                     />
                   )}
-                  <h3>🎁 {item.item_name}</h3>
+
+                  <h3>
+                    🎁 {item.item_name}
+                  </h3>
 
                   <p>
                     <strong>Description:</strong>{" "}
@@ -1259,7 +1525,9 @@ export default function Home() {
           >
             <h2>🛠️ Admin Dashboard</h2>
 
-            <h3>👥 Profiles ({profiles.length})</h3>
+            <h3>
+              👥 Profiles ({profiles.length})
+            </h3>
 
             {profiles.map((profile) => (
               <div
@@ -1279,7 +1547,9 @@ export default function Home() {
 
             <br />
 
-            <h3>📦 All Lost Items ({adminLostItems.length})</h3>
+            <h3>
+              📦 All Lost Items ({adminLostItems.length})
+            </h3>
 
             {adminLostItems.length === 0 ? (
               <p>No lost items.</p>
@@ -1294,7 +1564,9 @@ export default function Home() {
                     marginBottom: 15,
                   }}
                 >
-                  <h4>📦 {item.item_name}</h4>
+                  <h4>
+                    📦 {item.item_name}
+                  </h4>
 
                   {item.image_url && (
                     <img
@@ -1311,7 +1583,10 @@ export default function Home() {
                     />
                   )}
 
-                  <p>{item.description}</p>
+                  <p>
+                    <strong>Description:</strong>{" "}
+                    {item.description}
+                  </p>
 
                   <p>
                     <strong>Location:</strong>{" "}
@@ -1333,7 +1608,9 @@ export default function Home() {
                   )}
 
                   <button
-                    onClick={() => deleteLostItem(item.id)}
+                    onClick={() =>
+                      deleteLostItem(item.id)
+                    }
                   >
                     🗑️ Delete
                   </button>
@@ -1341,7 +1618,9 @@ export default function Home() {
               ))
             )}
 
-            <h3>🎁 All Found Items ({adminFoundItems.length})</h3>
+            <h3>
+              🎁 All Found Items ({adminFoundItems.length})
+            </h3>
 
             {adminFoundItems.length === 0 ? (
               <p>No found items.</p>
@@ -1370,9 +1649,15 @@ export default function Home() {
                       }}
                     />
                   )}
-                  <h4>🎁 {item.item_name}</h4>
 
-                  <p>{item.description}</p>
+                  <h4>
+                    🎁 {item.item_name}
+                  </h4>
+
+                  <p>
+                    <strong>Description:</strong>{" "}
+                    {item.description}
+                  </p>
 
                   <p>
                     <strong>Location:</strong>{" "}
@@ -1394,7 +1679,9 @@ export default function Home() {
                   )}
 
                   <button
-                    onClick={() => deleteFoundItem(item.id)}
+                    onClick={() =>
+                      deleteFoundItem(item.id)
+                    }
                   >
                     🗑️ Delete
                   </button>
@@ -1436,14 +1723,18 @@ export default function Home() {
     >
       <h1>🎒 BackToYou</h1>
 
-      <h2>{isLogin ? "Login" : "Create Account"}</h2>
+      <h2>
+        {isLogin ? "Login" : "Create Account"}
+      </h2>
 
       {!isLogin && (
         <input
           type="text"
           placeholder="Enter Name"
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) =>
+            setName(e.target.value)
+          }
           style={{
             display: "block",
             marginBottom: 15,
@@ -1457,7 +1748,9 @@ export default function Home() {
         type="email"
         placeholder="Enter Email"
         value={email}
-        onChange={(e) => setEmail(e.target.value)}
+        onChange={(e) =>
+          setEmail(e.target.value)
+        }
         style={{
           display: "block",
           marginBottom: 15,
@@ -1470,7 +1763,9 @@ export default function Home() {
         type="password"
         placeholder="Enter Password"
         value={password}
-        onChange={(e) => setPassword(e.target.value)}
+        onChange={(e) =>
+          setPassword(e.target.value)
+        }
         style={{
           display: "block",
           marginBottom: 15,
@@ -1480,15 +1775,23 @@ export default function Home() {
       />
 
       {isLogin ? (
-        <button onClick={login}>Login</button>
+        <button onClick={login}>
+          Login
+        </button>
       ) : (
-        <button onClick={signUp}>Sign Up</button>
+        <button onClick={signUp}>
+          Sign Up
+        </button>
       )}
 
       <br />
       <br />
 
-      <button onClick={() => setIsLogin(!isLogin)}>
+      <button
+        onClick={() =>
+          setIsLogin(!isLogin)
+        }
+      >
         {isLogin
           ? "Create New Account"
           : "Already have an account? Login"}
