@@ -70,6 +70,11 @@ export default function Home() {
 
   const [showMyReports, setShowMyReports] = useState(false);
 
+  const [myLostItems, setMyLostItems] = useState<Item[]>([]);
+  const [myFoundItems, setMyFoundItems] = useState<Item[]>([]);
+
+  const [myReportsLoading, setMyReportsLoading] = useState(false);
+
   // =========================
   // ADMIN STATES
   // =========================
@@ -124,7 +129,6 @@ export default function Home() {
       return;
     }
 
-    // Get profile information
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
       .select("name, email, role")
@@ -203,6 +207,11 @@ export default function Home() {
       setLocation("");
 
       setShowLostForm(false);
+
+      // Refresh My Reports if it is currently open
+      if (showMyReports) {
+        loadMyReports();
+      }
     }
   }
 
@@ -235,6 +244,11 @@ export default function Home() {
       setFoundLocation("");
 
       setShowFoundForm(false);
+
+      // Refresh My Reports if it is currently open
+      if (showMyReports) {
+        loadMyReports();
+      }
     }
   }
 
@@ -282,6 +296,10 @@ export default function Home() {
   // =========================
 
   async function loadMyReports() {
+    if (!email) return;
+
+    setMyReportsLoading(true);
+
     const { data: lostData, error: lostError } = await supabase
       .from("lost_items")
       .select("*")
@@ -295,21 +313,25 @@ export default function Home() {
       .order("id", { ascending: false });
 
     if (lostError) {
-      console.log(lostError);
+      console.log("My lost reports error:", lostError);
     }
 
     if (foundError) {
-      console.log(foundError);
+      console.log("My found reports error:", foundError);
     }
 
-    setLostItems(lostData || []);
-    setFoundItems(foundData || []);
+    setMyLostItems(lostData || []);
+    setMyFoundItems(foundData || []);
+
+    setMyReportsLoading(false);
   }
 
   function openMyReports() {
     setShowMyReports(true);
     setShowBrowse(false);
     setShowAdmin(false);
+    setShowLostForm(false);
+    setShowFoundForm(false);
 
     loadMyReports();
   }
@@ -355,6 +377,8 @@ export default function Home() {
     setShowAdmin(true);
     setShowBrowse(false);
     setShowMyReports(false);
+    setShowLostForm(false);
+    setShowFoundForm(false);
 
     loadAdminData();
   }
@@ -385,6 +409,10 @@ export default function Home() {
       );
 
       setLostItems((items) =>
+        items.filter((item) => item.id !== id)
+      );
+
+      setMyLostItems((items) =>
         items.filter((item) => item.id !== id)
       );
     }
@@ -418,6 +446,10 @@ export default function Home() {
       setFoundItems((items) =>
         items.filter((item) => item.id !== id)
       );
+
+      setMyFoundItems((items) =>
+        items.filter((item) => item.id !== id)
+      );
     }
   }
 
@@ -437,6 +469,9 @@ export default function Home() {
     setShowBrowse(false);
     setShowMyReports(false);
     setShowAdmin(false);
+
+    setMyLostItems([]);
+    setMyFoundItems([]);
   }
 
   // =========================
@@ -494,22 +529,20 @@ export default function Home() {
 
         <br />
 
-        {/* ADMIN DASHBOARD */}
+        {/* ADMIN DASHBOARD BUTTON */}
 
         {role === "admin" && (
-          <>
-            <button
-              onClick={openAdminDashboard}
-              style={{
-                display: "block",
-                marginBottom: 20,
-                fontSize: 18,
-                padding: 10,
-              }}
-            >
-              🛠️ Admin Dashboard
-            </button>
-          </>
+          <button
+            onClick={openAdminDashboard}
+            style={{
+              display: "block",
+              marginBottom: 20,
+              fontSize: 18,
+              padding: 10,
+            }}
+          >
+            🛠️ Admin Dashboard
+          </button>
         )}
 
         {/* LOST ITEM */}
@@ -724,6 +757,13 @@ export default function Home() {
                         {item.user_email}
                       </p>
 
+                      {item.created_at && (
+                        <p>
+                          <strong>Reported on:</strong>{" "}
+                          {new Date(item.created_at).toLocaleString()}
+                        </p>
+                      )}
+
                       <strong>STATUS: LOST</strong>
                     </div>
                   ))
@@ -763,6 +803,13 @@ export default function Home() {
                         {item.user_email}
                       </p>
 
+                      {item.created_at && (
+                        <p>
+                          <strong>Reported on:</strong>{" "}
+                          {new Date(item.created_at).toLocaleString()}
+                        </p>
+                      )}
+
                       <strong>STATUS: FOUND</strong>
                     </div>
                   ))
@@ -787,55 +834,104 @@ export default function Home() {
         </button>
 
         {showMyReports && (
-          <div style={{ marginBottom: 40 }}>
+          <div
+            style={{
+              marginBottom: 40,
+              padding: 20,
+              border: "1px solid #ccc",
+              borderRadius: 10,
+            }}
+          >
             <h2>👤 My Reports</h2>
 
-            <h3>📦 My Lost Reports</h3>
-
-            {lostItems.length === 0 ? (
-              <p>You have no lost item reports.</p>
+            {myReportsLoading ? (
+              <p>Loading your reports...</p>
             ) : (
-              lostItems.map((item) => (
-                <div
-                  key={`my-lost-${item.id}`}
-                  style={{
-                    border: "1px solid #ccc",
-                    borderRadius: 10,
-                    padding: 15,
-                    marginBottom: 15,
-                  }}
-                >
-                  <h3>{item.item_name}</h3>
-                  <p>{item.description}</p>
-                  <p>
-                    <strong>Location:</strong> {item.location}
-                  </p>
-                </div>
-              ))
-            )}
+              <>
+                {/* MY LOST REPORTS */}
 
-            <h3>🎁 My Found Reports</h3>
+                <h3>📦 My Lost Reports</h3>
 
-            {foundItems.length === 0 ? (
-              <p>You have no found item reports.</p>
-            ) : (
-              foundItems.map((item) => (
-                <div
-                  key={`my-found-${item.id}`}
-                  style={{
-                    border: "1px solid #ccc",
-                    borderRadius: 10,
-                    padding: 15,
-                    marginBottom: 15,
-                  }}
-                >
-                  <h3>{item.item_name}</h3>
-                  <p>{item.description}</p>
-                  <p>
-                    <strong>Location:</strong> {item.location}
-                  </p>
-                </div>
-              ))
+                {myLostItems.length === 0 ? (
+                  <p>You have no lost item reports.</p>
+                ) : (
+                  myLostItems.map((item) => (
+                    <div
+                      key={`my-lost-${item.id}`}
+                      style={{
+                        border: "1px solid #ccc",
+                        borderRadius: 10,
+                        padding: 15,
+                        marginBottom: 15,
+                      }}
+                    >
+                      <h3>📦 {item.item_name}</h3>
+
+                      <p>
+                        <strong>Description:</strong>{" "}
+                        {item.description}
+                      </p>
+
+                      <p>
+                        <strong>Location:</strong>{" "}
+                        {item.location}
+                      </p>
+
+                      {item.created_at && (
+                        <p>
+                          <strong>Reported on:</strong>{" "}
+                          {new Date(item.created_at).toLocaleString()}
+                        </p>
+                      )}
+
+                      <strong>STATUS: LOST</strong>
+                    </div>
+                  ))
+                )}
+
+                <br />
+
+                {/* MY FOUND REPORTS */}
+
+                <h3>🎁 My Found Reports</h3>
+
+                {myFoundItems.length === 0 ? (
+                  <p>You have no found item reports.</p>
+                ) : (
+                  myFoundItems.map((item) => (
+                    <div
+                      key={`my-found-${item.id}`}
+                      style={{
+                        border: "1px solid #ccc",
+                        borderRadius: 10,
+                        padding: 15,
+                        marginBottom: 15,
+                      }}
+                    >
+                      <h3>🎁 {item.item_name}</h3>
+
+                      <p>
+                        <strong>Description:</strong>{" "}
+                        {item.description}
+                      </p>
+
+                      <p>
+                        <strong>Location:</strong>{" "}
+                        {item.location}
+                      </p>
+
+                      {item.created_at && (
+                        <p>
+                          <strong>Reported on:</strong>{" "}
+                          {new Date(item.created_at).toLocaleString()}
+                        </p>
+                      )}
+
+                      <strong>STATUS: FOUND</strong>
+                    </div>
+                  ))
+                )}
+              </>
             )}
           </div>
         )}
@@ -901,6 +997,13 @@ export default function Home() {
                     Reporter: {item.user_email}
                   </p>
 
+                  {item.created_at && (
+                    <p>
+                      Reported on:{" "}
+                      {new Date(item.created_at).toLocaleString()}
+                    </p>
+                  )}
+
                   <button
                     onClick={() => deleteLostItem(item.id)}
                   >
@@ -936,6 +1039,13 @@ export default function Home() {
                   <p>
                     Reporter: {item.user_email}
                   </p>
+
+                  {item.created_at && (
+                    <p>
+                      Reported on:{" "}
+                      {new Date(item.created_at).toLocaleString()}
+                    </p>
+                  )}
 
                   <button
                     onClick={() => deleteFoundItem(item.id)}
@@ -983,20 +1093,18 @@ export default function Home() {
       <h2>{isLogin ? "Login" : "Create Account"}</h2>
 
       {!isLogin && (
-        <>
-          <input
-            type="text"
-            placeholder="Enter Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            style={{
-              display: "block",
-              marginBottom: 15,
-              padding: 10,
-              width: "100%",
-            }}
-          />
-        </>
+        <input
+          type="text"
+          placeholder="Enter Name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          style={{
+            display: "block",
+            marginBottom: 15,
+            padding: 10,
+            width: "100%",
+          }}
+        />
       )}
 
       <input
@@ -1034,9 +1142,7 @@ export default function Home() {
       <br />
       <br />
 
-      <button
-        onClick={() => setIsLogin(!isLogin)}
-      >
+      <button onClick={() => setIsLogin(!isLogin)}>
         {isLogin
           ? "Create New Account"
           : "Already have an account? Login"}
