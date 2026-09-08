@@ -412,97 +412,120 @@ export default function Home() {
   // ENSURE CURRENT USER PROFILE
   // =========================
 
-  async function ensureCurrentUserProfile(
-    contactPreferences?: ContactPreferenceValues
-  ): Promise<Profile | null> {
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+async function ensureCurrentUserProfile(
+  contactPreferences?: ContactPreferenceValues
+): Promise<Profile | null> {
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
 
-    if (userError || !user?.email) {
-      console.error(
-        "Could not ensure the authenticated user profile:",
-        userError || "No authenticated user email found."
-      );
+  if (userError || !user?.email) {
+    console.error(
+      "Could not ensure the authenticated user profile:",
+      userError || "No authenticated user email found."
+    );
 
-      return null;
-    }
+    return null;
+  }
 
-    const {
-      data: existingProfile,
-      error: profileError,
-    } = await supabase
-      .from("profiles")
-      .select(
-        "id, name, email, role, phone, contact_email_enabled, contact_phone_enabled, contact_in_app_chat_enabled"
-      )
-      .eq("email", user.email)
-      .order("created_at", {
-        ascending: false,
-      })
-      .limit(1)
-      .maybeSingle();
+  const email = user.email.toLowerCase();
 
-    if (profileError) {
-      console.error(
-        "Could not load the authenticated user profile:",
-        profileError
-      );
+  // First, check whether the profile already exists.
+  const {
+    data: existingProfile,
+    error: profileError,
+  } = await supabase
+    .from("profiles")
+    .select(
+      "id, name, email, role, phone, contact_email_enabled, contact_phone_enabled, contact_in_app_chat_enabled"
+    )
+    .eq("email", email)
+    .maybeSingle();
 
-      return null;
-    }
+  if (profileError) {
+    console.error(
+      "Could not load the authenticated user profile:",
+      profileError
+    );
 
-    if (existingProfile) {
-      return existingProfile;
-    }
+    return null;
+  }
 
-    const metadataName =
-      typeof user.user_metadata?.name === "string"
-        ? user.user_metadata.name
-        : typeof user.user_metadata?.full_name === "string"
-          ? user.user_metadata.full_name
-          : name.trim() || "User";
+  if (existingProfile) {
+    return existingProfile;
+  }
 
-    const {
-      data: createdProfile,
-      error: createError,
-    } = await supabase
-      .from("profiles")
-      .insert([
-        {
-          name: metadataName || "User",
-          email: user.email,
-          role: "user",
-          phone: contactPreferences?.phone ?? null,
+  const metadataName =
+    typeof user.user_metadata?.name === "string"
+      ? user.user_metadata.name
+      : typeof user.user_metadata?.full_name === "string"
+        ? user.user_metadata.full_name
+        : name.trim() || "User";
 
-          contact_email_enabled:
-            contactPreferences?.contact_email_enabled ?? true,
+  // Try to create the profile.
+  const {
+    data: createdProfile,
+    error: createError,
+  } = await supabase
+    .from("profiles")
+    .insert([
+      {
+        name: metadataName || "User",
+        email,
+        role: "user",
+        phone: contactPreferences?.phone ?? null,
+        contact_email_enabled:
+          contactPreferences?.contact_email_enabled ?? true,
+        contact_phone_enabled:
+          contactPreferences?.contact_phone_enabled ?? false,
+        contact_in_app_chat_enabled:
+          contactPreferences?.contact_in_app_chat_enabled ?? false,
+      },
+    ])
+    .select(
+      "id, name, email, role, phone, contact_email_enabled, contact_phone_enabled, contact_in_app_chat_enabled"
+    )
+    .single();
 
-          contact_phone_enabled:
-            contactPreferences?.contact_phone_enabled ?? false,
-
-          contact_in_app_chat_enabled:
-            contactPreferences?.contact_in_app_chat_enabled ?? false,
-        },
-      ])
-      .select(
-        "id, name, email, role, phone, contact_email_enabled, contact_phone_enabled, contact_in_app_chat_enabled"
-      )
-      .single();
-
-    if (createError) {
-      console.error(
-        "Could not create the authenticated user profile:",
-        createError
-      );
-
-      return null;
-    }
-
+  // Profile was created successfully.
+  if (createdProfile) {
     return createdProfile;
   }
 
+  // Another request may have created the profile at the same time.
+  // PostgreSQL error 23505 = unique constraint violation.
+  if (createError?.code === "23505") {
+    const {
+      data: profileAfterConflict,
+      error: retryError,
+    } = await supabase
+      .from("profiles")
+      .select(
+        "id, name, email, role, phone, contact_email_enabled, contact_phone_enabled, contact_in_app_chat_enabled"
+      )
+      .eq("email", email)
+      .maybeSingle();
+
+    if (retryError) {
+      console.error(
+        "Could not load profile after duplicate creation was prevented:",
+        retryError
+      );
+
+      return null;
+    }
+
+    return profileAfterConflict;
+  }
+
+  console.error(
+    "Could not create the authenticated user profile:",
+    createError
+  );
+
+  return null;
+}
   // =========================
   // SAVE CONTACT PREFERENCES
   // =========================
