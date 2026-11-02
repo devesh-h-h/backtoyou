@@ -1,0 +1,38 @@
+-- REVIEW-ONLY PROPOSAL. Do not apply without first inspecting the deployed
+-- baseline schemas, grants, and existing policies.
+--
+-- The repository does not contain the original definitions for these tables.
+-- Existing permissive policies must be reconciled or removed because
+-- PostgreSQL combines permissive policies with OR semantics.
+--
+-- Required verification before applying:
+--   1. profiles.email is unique and matches the authenticated JWT email.
+--   2. lost_items and found_items contain user_email, item_name,
+--      description, location, image_url, and created_at.
+--   3. found_items.status uses available/claimed/returned.
+--   4. Existing policies do not grant broader write access.
+--   5. Admin role changes are performed only by a trusted administrator.
+--
+-- Intended policy shape:
+--
+-- alter table public.lost_items enable row level security;
+-- create policy "Authenticated users can read lost reports"
+--   on public.lost_items for select to authenticated using (true);
+-- create policy "Users can create their own lost reports"
+--   on public.lost_items for insert to authenticated
+--   with check (user_email = auth.jwt() ->> 'email');
+-- create policy "Users can update their own lost reports"
+--   on public.lost_items for update to authenticated
+--   using (user_email = auth.jwt() ->> 'email')
+--   with check (user_email = auth.jwt() ->> 'email');
+-- create policy "Users can delete their own lost reports"
+--   on public.lost_items for delete to authenticated
+--   using (user_email = auth.jwt() ->> 'email');
+--
+-- Repeat the same ownership policies for found_items, but add an explicit
+-- database trigger or column-level privilege design so ordinary users cannot
+-- change user_email or status. Admin report management must be represented by
+-- separate admin policies tied to a trusted role source.
+--
+-- This proposal intentionally contains no executable statements until the
+-- missing schema and existing-policy inventory has been reviewed.

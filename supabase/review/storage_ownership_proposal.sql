@@ -1,0 +1,26 @@
+-- REVIEW-ONLY. The repository does not contain the deployed bucket definition
+-- or storage.objects policies, and this SQL must not be applied blindly.
+--
+-- The client currently uploads random root-level paths to item-images and
+-- deletes only the path created by the current failed operation. Before
+-- applying a storage policy, verify the bucket name, visibility, owner_id
+-- behavior, and whether existing public image URLs are required.
+--
+-- Required disposable-project checks:
+--   1. An authenticated user can upload an image at the application's path.
+--   2. A different authenticated user cannot update or delete that object.
+--   3. The uploader can delete only their own object during failed-report
+--      cleanup.
+--   4. Public reads remain available only if the existing bucket is public.
+--
+-- Expected policy shape once those facts are verified:
+--
+-- create policy "Authenticated users can upload item images"
+--   on storage.objects for insert to authenticated
+--   with check (bucket_id = 'item-images' and owner_id = auth.uid()::text);
+-- create policy "Owners and admins can delete item images"
+--   on storage.objects for delete to authenticated
+--   using (bucket_id = 'item-images' and owner_id = auth.uid()::text);
+--
+-- Do not change bucket visibility or remove existing objects as part of this
+-- review. Admin deletion requires a separately verified trusted role path.
